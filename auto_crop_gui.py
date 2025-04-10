@@ -2,6 +2,7 @@ import os
 import sys
 
 import cv2
+import dlib
 import numpy as np
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QImage, QPixmap
@@ -17,9 +18,30 @@ class FaceCropApp(QMainWindow):
         self.title = '顔認識自動クロップツール'
         self.original_image = None
         self.cropped_image = None
-        self.face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades +
-                                                  'haarcascade_frontalface_default.xml')
-        self.eye_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_eye.xml')
+
+        # 複数の顔検出カスケード分類器を読み込む
+        cascade_path = cv2.data.haarcascades
+        self.face_cascade_default = cv2.CascadeClassifier(cascade_path +
+                                                          'haarcascade_frontalface_default.xml')
+        self.face_cascade_alt = cv2.CascadeClassifier(cascade_path +
+                                                      'haarcascade_frontalface_alt.xml')
+        self.face_cascade_alt2 = cv2.CascadeClassifier(cascade_path +
+                                                       'haarcascade_frontalface_alt2.xml')
+
+        # LBPベースの分類器は存在確認してから読み込む
+        self.lbp_face_cascade = None
+        lbp_path = os.path.join(cascade_path, 'lbpcascade_frontalface.xml')
+        if os.path.exists(lbp_path):
+            self.lbp_face_cascade = cv2.CascadeClassifier(lbp_path)
+
+        # DlibのHOGベースの顔検出器
+        self.dlib_face_detector = dlib.get_frontal_face_detector()
+
+        # 目検出用の分類器
+        self.eye_cascade = cv2.CascadeClassifier(cascade_path + 'haarcascade_eye.xml')
+        self.eye_cascade_glasses = cv2.CascadeClassifier(cascade_path +
+                                                         'haarcascade_eye_tree_eyeglasses.xml')
+
         # デバッグモードの追加（三分割線を表示するかどうか）
         self.debug_mode = True
 
@@ -125,8 +147,62 @@ class FaceCropApp(QMainWindow):
             # グレースケールに変換
             gray = cv2.cvtColor(self.original_image, cv2.COLOR_BGR2GRAY)
 
-            # 顔検出
-            faces = self.face_cascade.detectMultiScale(gray, 1.3, 5)
+            # コントラストを改善（メガネ着用時の検出精度向上のため）
+            # ヒストグラム平坦化を適用
+            equalized_gray = cv2.equalizeHist(gray)
+
+            # 複数の分類器を使用して顔検出を行う
+            faces_default = self.face_cascade_default.detectMultiScale(gray, 1.3, 5)
+            faces_alt = self.face_cascade_alt.detectMultiScale(gray, 1.2, 5)
+            faces_alt2 = self.face_cascade_alt2.detectMultiScale(gray, 1.1, 5)
+
+            # LBP分類器がある場合のみ使用
+            lbp_faces = []
+            if self.lbp_face_cascade is not None:
+                lbp_faces = self.lbp_face_cascade.detectMultiScale(equalized_gray, 1.2, 5)
+
+            # DlibのHOGベースの顔検出
+            dlib_faces = self.dlib_face_detector(gray, 1)
+            dlib_faces = [(d.left(), d.top(), d.width(), d.height()) for d in dlib_faces]
+
+            # すべての検出結果を集約
+            all_faces = []
+            if len(faces_default) > 0:
+                all_faces.extend(faces_default)
+            if len(faces_alt) > 0:
+                all_faces.extend(faces_alt)
+            if len(faces_alt2) > 0:
+                all_faces.extend(faces_alt2)
+            if len(lbp_faces) > 0:
+                all_faces.extend(lbp_faces)
+            if len(dlib_faces) > 0:
+                all_faces.extend(dlib_faces)
+
+            # 重複する検出を統合
+            if len(all_faces) > 0:
+                # 座標、幅、高さが近い顔は同一とみなす
+                unique_faces = []
+                for (x, y, w, h) in all_faces:
+                    is_unique = True
+                    for (ux, uy, uw, uh) in unique_faces:
+                        # 中心点の距離が小さい場合は重複と判定
+                        center_dist = np.sqrt((x + w / 2 - ux - uw / 2)**2 +
+                                              (y + h / 2 - uy - uh / 2)**2)
+                        overlap_threshold = (w + uw) / 4  # 幅の平均の半分
+                        if center_dist < overlap_threshold:
+                            is_unique = False
+                            # サイズの大きい方を採用
+                            if w * h > uw * uh:
+                                # 既存のエントリを上書き
+                                unique_faces.remove((ux, uy, uw, uh))
+                                unique_faces.append((x, y, w, h))
+                            break
+                    if is_unique:
+                        unique_faces.append((x, y, w, h))
+
+                faces = unique_faces
+            else:
+                faces = []
 
             if len(faces) == 0:
                 QMessageBox.warning(self, "警告", "画像から顔を検出できませんでした")
@@ -140,9 +216,13 @@ class FaceCropApp(QMainWindow):
             # 元画像のサイズを取得
             img_height, img_width = self.original_image.shape[:2]
 
-            # 顔領域と目を検出
+            # 顔領域を取得
             face_roi = gray[y:y + h, x:x + w]
+
+            # 目の検出を試みる（通常の目検出器とメガネ用の検出器を両方使用）
             eyes = self.eye_cascade.detectMultiScale(face_roi)
+            if len(eyes) < 2:  # 通常の検出器で2つ未満の場合はメガネ用検出器を試す
+                eyes = self.eye_cascade_glasses.detectMultiScale(face_roi, 1.1, 3)
 
             # 顔の中心を計算
             face_center_x = x + w // 2
@@ -159,6 +239,9 @@ class FaceCropApp(QMainWindow):
 
                 # 目の平均位置を使用
                 eyes_y = sum(eye_y_positions) // len(eye_y_positions)
+            else:
+                # 目が検出できない場合は、顔の上部1/3あたりを目の位置と推定
+                eyes_y = y + h // 3
 
             # 16:9のアスペクト比で計算
             target_aspect_ratio = 16 / 9
@@ -171,8 +254,7 @@ class FaceCropApp(QMainWindow):
             top_third_line = crop_height // 3
 
             # 顔または目が上側の横ラインに来るように調整
-            # 目の位置が検出された場合は目を使用、そうでなければ顔の中心を使用
-            target_y = eyes_y if len(eyes) >= 2 else face_center_y
+            target_y = eyes_y  # 目の位置または推定位置を使用
 
             # クロップのトップ位置を計算 (target_yが上から1/3の位置に来るように)
             crop_top = max(0, target_y - top_third_line)
@@ -221,7 +303,18 @@ class FaceCropApp(QMainWindow):
 
             # クロップした画像内で顔を再検出
             cropped_gray = cv2.cvtColor(self.cropped_image, cv2.COLOR_BGR2GRAY)
-            cropped_faces = self.face_cascade.detectMultiScale(cropped_gray, 1.3, 5)
+            cropped_equalized = cv2.equalizeHist(cropped_gray)
+
+            # 複数の分類器を使用（LBP分類器がある場合のみ使用）
+            cropped_faces = self.face_cascade_default.detectMultiScale(cropped_gray, 1.3, 5)
+            cropped_faces_lbp = []
+            if self.lbp_face_cascade is not None:
+                cropped_faces_lbp = self.lbp_face_cascade.detectMultiScale(
+                    cropped_equalized, 1.2, 5)
+
+            # 結果を結合
+            if len(cropped_faces_lbp) > 0:
+                cropped_faces = np.vstack((cropped_faces, cropped_faces_lbp))
 
             # デバッグ用：三分割のグリッドと顔矩形を表示
             display_image = self.cropped_image.copy()
@@ -245,7 +338,24 @@ class FaceCropApp(QMainWindow):
                 cv2.circle(display_image, (int(main_face_rel_x), int(main_face_rel_y)), 5,
                            (0, 0, 255), -1)
 
-            # クロップ画像内で検出されたすべての顔に矩形を描画
+            # 元画像で検出されたすべての顔を表示（デバッグ用）
+            for i, (fx, fy, fw, fh) in enumerate(faces):
+                if i == 0:  # 最も大きい顔（クロップの基準となった顔）
+                    # 赤い矩形で表示
+                    rx = fx - crop_left
+                    ry = fy - crop_top
+                    if (0 <= rx < w and 0 <= ry < h and 0 <= rx + fw < w and 0 <= ry + fh < h):
+                        cv2.rectangle(display_image, (int(rx), int(ry)),
+                                      (int(rx + fw), int(ry + fh)), (0, 0, 255), 2)
+                else:
+                    # その他の顔は灰色で表示
+                    rx = fx - crop_left
+                    ry = fy - crop_top
+                    if (0 <= rx < w and 0 <= ry < h and 0 <= rx + fw < w and 0 <= ry + fh < h):
+                        cv2.rectangle(display_image, (int(rx), int(ry)),
+                                      (int(rx + fw), int(ry + fh)), (128, 128, 128), 2)
+
+            # クロップした画像内で再検出した顔も表示
             if len(cropped_faces) > 0:
                 for i, (fx, fy, fw, fh) in enumerate(cropped_faces):
                     # 各顔の中心座標を計算
@@ -256,13 +366,14 @@ class FaceCropApp(QMainWindow):
                     distance = ((face_cx - main_face_rel_x)**2 +
                                 (face_cy - main_face_rel_y)**2)**0.5
 
-                    # 基準となった顔に近い顔は赤、それ以外は灰色
+                    # 基準となった顔に近い顔は赤線、それ以外は灰色線
+                    # LINE_DASHはOpenCVのバージョンによっては存在しないため、実線を使用
                     if distance < max(fw, fh) * 0.5:  # 顔の幅または高さの半分以内の距離なら同一人物と判定
                         cv2.rectangle(display_image, (fx, fy), (fx + fw, fy + fh), (0, 0, 255),
-                                      2)  # 赤色
+                                      1)  # 赤色線
                     else:
                         cv2.rectangle(display_image, (fx, fy), (fx + fw, fy + fh), (128, 128, 128),
-                                      2)  # 灰色
+                                      1)  # 灰色線
 
             # クロップした画像をQPixmapに変換して表示
             height, width, channels = display_image.shape

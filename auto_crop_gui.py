@@ -219,7 +219,11 @@ class FaceCropApp(QMainWindow):
             self.cropped_image = self.original_image[int(crop_top):int(crop_bottom),
                                                      int(crop_left):int(crop_right)].copy()
 
-            # デバッグ用：三分割のグリッドを表示
+            # クロップした画像内で顔を再検出
+            cropped_gray = cv2.cvtColor(self.cropped_image, cv2.COLOR_BGR2GRAY)
+            cropped_faces = self.face_cascade.detectMultiScale(cropped_gray, 1.3, 5)
+
+            # デバッグ用：三分割のグリッドと顔矩形を表示
             display_image = self.cropped_image.copy()
             h, w = display_image.shape[:2]
 
@@ -230,11 +234,35 @@ class FaceCropApp(QMainWindow):
             cv2.line(display_image, (0, h // 3), (w, h // 3), (0, 255, 0), 1)
             cv2.line(display_image, (0, 2 * h // 3), (w, 2 * h // 3), (0, 255, 0), 1)
 
-            # 顔の位置に赤い点を表示（デバッグ用）
-            face_rel_y = target_y - crop_top
-            face_rel_x = face_center_x - crop_left
-            if 0 <= face_rel_x < w and 0 <= face_rel_y < h:
-                cv2.circle(display_image, (int(face_rel_x), int(face_rel_y)), 5, (0, 0, 255), -1)
+            # クロップした画像内のすべての顔に矩形を描画
+            # - 元の画像で最も大きかった顔は赤色(0,0,255)で表示
+            # - その他の顔は灰色(128,128,128)で表示
+            main_face_rel_x = face_center_x - crop_left
+            main_face_rel_y = face_center_y - crop_top
+
+            # 最初に赤い点を描画（基準となった顔の中心）
+            if 0 <= main_face_rel_x < w and 0 <= main_face_rel_y < h:
+                cv2.circle(display_image, (int(main_face_rel_x), int(main_face_rel_y)), 5,
+                           (0, 0, 255), -1)
+
+            # クロップ画像内で検出されたすべての顔に矩形を描画
+            if len(cropped_faces) > 0:
+                for i, (fx, fy, fw, fh) in enumerate(cropped_faces):
+                    # 各顔の中心座標を計算
+                    face_cx = fx + fw // 2
+                    face_cy = fy + fh // 2
+
+                    # メイン顔との距離を計算
+                    distance = ((face_cx - main_face_rel_x)**2 +
+                                (face_cy - main_face_rel_y)**2)**0.5
+
+                    # 基準となった顔に近い顔は赤、それ以外は灰色
+                    if distance < max(fw, fh) * 0.5:  # 顔の幅または高さの半分以内の距離なら同一人物と判定
+                        cv2.rectangle(display_image, (fx, fy), (fx + fw, fy + fh), (0, 0, 255),
+                                      2)  # 赤色
+                    else:
+                        cv2.rectangle(display_image, (fx, fy), (fx + fw, fy + fh), (128, 128, 128),
+                                      2)  # 灰色
 
             # クロップした画像をQPixmapに変換して表示
             height, width, channels = display_image.shape

@@ -3,6 +3,7 @@ import sys
 
 import cv2
 import dlib
+import mediapipe as mp
 import numpy as np
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QImage, QPixmap
@@ -18,6 +19,12 @@ class FaceCropApp(QMainWindow):
         self.title = '顔認識自動クロップツール'
         self.original_image = None
         self.cropped_image = None
+
+        # MediaPipeの顔検出モジュールを初期化
+        self.mp_face_detection = mp.solutions.face_detection
+        self.mp_drawing = mp.solutions.drawing_utils
+        self.face_detection = self.mp_face_detection.FaceDetection(model_selection=1,
+                                                                   min_detection_confidence=0.5)
 
         # 複数の顔検出カスケード分類器を読み込む
         cascade_path = cv2.data.haarcascades
@@ -41,6 +48,20 @@ class FaceCropApp(QMainWindow):
         self.eye_cascade = cv2.CascadeClassifier(cascade_path + 'haarcascade_eye.xml')
         self.eye_cascade_glasses = cv2.CascadeClassifier(cascade_path +
                                                          'haarcascade_eye_tree_eyeglasses.xml')
+
+        # 横顔検出用の分類器
+        self.profile_face_cascade = cv2.CascadeClassifier(cascade_path +
+                                                          'haarcascade_profileface.xml')
+
+        # OpenCV DNNベースの顔検出モデルを読み込む
+        self.dnn_model_path = os.path.join(cascade_path, 'deploy.prototxt')
+        self.dnn_weights_path = os.path.join(cascade_path,
+                                             'res10_300x300_ssd_iter_140000.caffemodel')
+        if os.path.exists(self.dnn_model_path) and os.path.exists(self.dnn_weights_path):
+            self.dnn_face_detector = cv2.dnn.readNetFromCaffe(self.dnn_model_path,
+                                                              self.dnn_weights_path)
+        else:
+            self.dnn_face_detector = None
 
         # デバッグモードの追加（三分割線を表示するかどうか）
         self.debug_mode = True
@@ -147,57 +168,43 @@ class FaceCropApp(QMainWindow):
             # グレースケールに変換
             gray = cv2.cvtColor(self.original_image, cv2.COLOR_BGR2GRAY)
 
-            # コントラストを改善（メガネ着用時の検出精度向上のため）
-            # ヒストグラム平坦化を適用
-            equalized_gray = cv2.equalizeHist(gray)
-
-            # 複数の分類器を使用して顔検出を行う
-            faces_default = self.face_cascade_default.detectMultiScale(gray, 1.3, 5)
-            faces_alt = self.face_cascade_alt.detectMultiScale(gray, 1.2, 5)
-            faces_alt2 = self.face_cascade_alt2.detectMultiScale(gray, 1.1, 5)
-
-            # LBP分類器がある場合のみ使用
-            lbp_faces = []
-            if self.lbp_face_cascade is not None:
-                lbp_faces = self.lbp_face_cascade.detectMultiScale(equalized_gray, 1.2, 5)
-
-            # DlibのHOGベースの顔検出
-            dlib_faces = self.dlib_face_detector(gray, 1)
-            dlib_faces = [(d.left(), d.top(), d.width(), d.height()) for d in dlib_faces]
+            # MediaPipeで顔検出
+            results = self.face_detection.process(
+                cv2.cvtColor(self.original_image, cv2.COLOR_BGR2RGB))
+            mediapipe_faces = []
+            if results.detections:
+                for detection in results.detections:
+                    bboxC = detection.location_data.relative_bounding_box
+                    ih, iw, _ = self.original_image.shape
+                    x, y, w, h = (int(bboxC.xmin * iw), int(bboxC.ymin * ih), int(bboxC.width * iw),
+                                  int(bboxC.height * ih))
+                    mediapipe_faces.append((x, y, w, h))
 
             # すべての検出結果を集約
-            all_faces = []
-            if len(faces_default) > 0:
-                all_faces.extend(faces_default)
-            if len(faces_alt) > 0:
-                all_faces.extend(faces_alt)
-            if len(faces_alt2) > 0:
-                all_faces.extend(faces_alt2)
-            if len(lbp_faces) > 0:
-                all_faces.extend(lbp_faces)
-            if len(dlib_faces) > 0:
-                all_faces.extend(dlib_faces)
+            all_faces = mediapipe_faces
 
             # 重複する検出を統合
             if len(all_faces) > 0:
-                # 座標、幅、高さが近い顔は同一とみなす
                 unique_faces = []
                 for (x, y, w, h) in all_faces:
                     is_unique = True
                     for (ux, uy, uw, uh) in unique_faces:
-                        # 中心点の距離が小さい場合は重複と判定
                         center_dist = np.sqrt((x + w / 2 - ux - uw / 2)**2 +
                                               (y + h / 2 - uy - uh / 2)**2)
-                        overlap_threshold = (w + uw) / 4  # 幅の平均の半分
+                        overlap_threshold = (w + uw) / 4
                         if center_dist < overlap_threshold:
                             is_unique = False
-                            # サイズの大きい方を採用
                             if w * h > uw * uh:
-                                # 既存のエントリを上書き
                                 unique_faces.remove((ux, uy, uw, uh))
                                 unique_faces.append((x, y, w, h))
                             break
                     if is_unique:
+                        # 顔領域を拡張（10%拡張）
+                        padding = int(0.1 * min(w, h))
+                        x = max(0, x - padding)
+                        y = max(0, y - padding)
+                        w = min(self.original_image.shape[1] - x, w + 2 * padding)
+                        h = min(self.original_image.shape[0] - y, h + 2 * padding)
                         unique_faces.append((x, y, w, h))
 
                 faces = unique_faces
@@ -209,7 +216,6 @@ class FaceCropApp(QMainWindow):
                 return
 
             # 最も大きい顔を使用（複数ある場合）
-            # 顔の大きさ（幅×高さ）で並べ替え
             faces = sorted(faces, key=lambda x: x[2] * x[3], reverse=True)
             x, y, w, h = faces[0]
 

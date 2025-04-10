@@ -19,6 +19,9 @@ class FaceCropApp(QMainWindow):
         self.cropped_image = None
         self.face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades +
                                                   'haarcascade_frontalface_default.xml')
+        self.eye_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_eye.xml')
+        # デバッグモードの追加（三分割線を表示するかどうか）
+        self.debug_mode = True
 
         self.init_ui()
 
@@ -134,51 +137,109 @@ class FaceCropApp(QMainWindow):
             faces = sorted(faces, key=lambda x: x[2] * x[3], reverse=True)
             x, y, w, h = faces[0]
 
+            # 元画像のサイズを取得
+            img_height, img_width = self.original_image.shape[:2]
+
+            # 顔領域と目を検出
+            face_roi = gray[y:y + h, x:x + w]
+            eyes = self.eye_cascade.detectMultiScale(face_roi)
+
             # 顔の中心を計算
             face_center_x = x + w // 2
             face_center_y = y + h // 2
 
-            # 画像の高さと幅を取得
-            img_height, img_width = self.original_image.shape[:2]
+            # 目の位置を計算（検出された場合）
+            eyes_y = face_center_y
+            if len(eyes) >= 2:
+                # 目の位置（縦）の平均を計算
+                eye_y_positions = []
+                for ex, ey, ew, eh in eyes:
+                    eye_center_y = y + ey + eh // 2
+                    eye_y_positions.append(eye_center_y)
 
-            # 16:9のアスペクト比で計算（高さを基準にした場合の幅）
-            target_width = int(img_height * 16 / 9)
+                # 目の平均位置を使用
+                eyes_y = sum(eye_y_positions) // len(eye_y_positions)
 
-            # 元画像の幅が計算した幅よりも小さい場合は、幅を基準にして高さを計算
-            if img_width < target_width:
-                target_height = int(img_width * 9 / 16)
-                crop_width = img_width
-                crop_height = target_height
+            # 16:9のアスペクト比で計算
+            target_aspect_ratio = 16 / 9
+
+            # 最終的なクロップの高さと幅を決定
+            crop_height = min(img_height, int(img_width / target_aspect_ratio))
+            crop_width = min(img_width, int(crop_height * target_aspect_ratio))
+
+            # 三分割法の上側のライン位置を計算（クロップ後の上から1/3の位置）
+            top_third_line = crop_height // 3
+
+            # 顔または目が上側の横ラインに来るように調整
+            # 目の位置が検出された場合は目を使用、そうでなければ顔の中心を使用
+            target_y = eyes_y if len(eyes) >= 2 else face_center_y
+
+            # クロップのトップ位置を計算 (target_yが上から1/3の位置に来るように)
+            crop_top = max(0, target_y - top_third_line)
+
+            # もし画像の下側がはみ出る場合は調整
+            if crop_top + crop_height > img_height:
+                crop_top = max(0, img_height - crop_height)
+
+            # 横方向の中心を顔の中心に合わせる
+            crop_left = max(0, face_center_x - crop_width // 2)
+
+            # もし画像の右側がはみ出る場合は調整
+            if crop_left + crop_width > img_width:
+                crop_left = max(0, img_width - crop_width)
+
+            # 横方向の三分割ラインを計算
+            grid_left = crop_width // 3
+            grid_right = (crop_width * 2) // 3
+
+            # 顔の中心を横方向の近い方の三分割ラインに合わせる調整
+            # 顔の中心位置（クロップ画像内の相対位置）
+            face_rel_x = face_center_x - crop_left
+
+            # どちらのグリッドラインに近いか判定
+            if abs(face_rel_x - grid_left) < abs(face_rel_x - grid_right):
+                # 左の線に近い場合、左の線に合わせる
+                new_crop_left = max(0, face_center_x - grid_left)
             else:
-                crop_width = target_width
-                crop_height = img_height
+                # 右の線に近い場合、右の線に合わせる
+                new_crop_left = max(0, face_center_x - grid_right)
 
-            # 顔の中心を基に切り抜き範囲を決定
-            start_x = max(0, face_center_x - crop_width // 2)
-            end_x = start_x + crop_width
+            # 境界チェック
+            if new_crop_left + crop_width > img_width:
+                new_crop_left = max(0, img_width - crop_width)
 
-            # x座標がはみ出す場合の調整
-            if end_x > img_width:
-                end_x = img_width
-                start_x = max(0, end_x - crop_width)
+            # 調整後の左位置を適用
+            crop_left = new_crop_left
 
-            # y座標（中央に顔がくるよう調整）
-            start_y = max(0, face_center_y - crop_height // 2)
-            end_y = start_y + crop_height
+            # 最終的なクロップ範囲を設定
+            crop_right = min(crop_left + crop_width, img_width)
+            crop_bottom = min(crop_top + crop_height, img_height)
 
-            # y座標がはみ出す場合の調整
-            if end_y > img_height:
-                end_y = img_height
-                start_y = max(0, end_y - crop_height)
+            # この範囲で画像をクロップ
+            self.cropped_image = self.original_image[int(crop_top):int(crop_bottom),
+                                                     int(crop_left):int(crop_right)].copy()
 
-            # 画像をクロップ
-            self.cropped_image = self.original_image[start_y:end_y, start_x:end_x].copy()
+            # デバッグ用：三分割のグリッドを表示
+            display_image = self.cropped_image.copy()
+            h, w = display_image.shape[:2]
+
+            # 縦線
+            cv2.line(display_image, (w // 3, 0), (w // 3, h), (0, 255, 0), 1)
+            cv2.line(display_image, (2 * w // 3, 0), (2 * w // 3, h), (0, 255, 0), 1)
+            # 横線
+            cv2.line(display_image, (0, h // 3), (w, h // 3), (0, 255, 0), 1)
+            cv2.line(display_image, (0, 2 * h // 3), (w, 2 * h // 3), (0, 255, 0), 1)
+
+            # 顔の位置に赤い点を表示（デバッグ用）
+            face_rel_y = target_y - crop_top
+            face_rel_x = face_center_x - crop_left
+            if 0 <= face_rel_x < w and 0 <= face_rel_y < h:
+                cv2.circle(display_image, (int(face_rel_x), int(face_rel_y)), 5, (0, 0, 255), -1)
 
             # クロップした画像をQPixmapに変換して表示
-            height, width, channels = self.cropped_image.shape
+            height, width, channels = display_image.shape
             bytes_per_line = channels * width
-            q_img = QImage(self.cropped_image.data, width, height, bytes_per_line,
-                           QImage.Format_BGR888)
+            q_img = QImage(display_image.data, width, height, bytes_per_line, QImage.Format_BGR888)
             pixmap = QPixmap.fromImage(q_img)
 
             # スケーリング
@@ -191,7 +252,9 @@ class FaceCropApp(QMainWindow):
             self.save_button.setEnabled(True)
 
         except Exception as e:
-            QMessageBox.critical(self, "エラー", f"クロップ処理エラー: {str(e)}")
+            import traceback
+            error_message = f"クロップ処理エラー: {str(e)}\n{traceback.format_exc()}"
+            QMessageBox.critical(self, "エラー", error_message)
 
     def save_image(self):
         if self.cropped_image is None:

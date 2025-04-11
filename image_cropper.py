@@ -5,20 +5,40 @@ from face_detector import FaceDetector
 
 
 class ImageCropper:
+    """
+    顔検出に基づいて画像をクロップするクラス
+    
+    検出された顔の位置を元に、三分割法に基づいて画像を最適な位置でクロップする
+    機能を提供します。主に16:9のアスペクト比でのクロップに対応しています。
+    """
 
     def __init__(self):
+        """
+        ImageCropperクラスの初期化メソッド
+        
+        引数:
+            なし
+            
+        戻り値:
+            なし
+        """
         self.face_detector = FaceDetector()
 
     def crop_image(self, original_image, debug_mode=False):
         """
-        顔検出に基づいて画像をクロップする関数
+        顔検出に基づいて画像をクロップするメソッド
         
-        Args:
-            original_image: 入力画像
-            debug_mode: デバッグモード（Trueの場合、グリッド線と検出結果を表示）
+        検出された顔の位置と目の位置を基準に、三分割法を適用して
+        最適な位置で画像をクロップします。デバッグモードでは
+        グリッド線と検出結果を可視化します。
+        
+        引数:
+            original_image: 入力画像（OpenCV形式のndarray）
+            debug_mode: デバッグモードフラグ（True=可視化情報を含む画像を返す）
             
-        Returns:
+        戻り値:
             クロップされた画像または、デバッグモードの場合は可視化された画像
+            顔が検出できなかった場合はNoneを返す
         """
         try:
             if original_image is None:
@@ -101,7 +121,7 @@ class ImageCropper:
             cropped_image = original_image[int(crop_top):int(crop_bottom),
                                            int(crop_left):int(crop_right)].copy()
 
-            # クロップした画像内で顔を再検出
+            # クロップした画像内で顔を再検出（視覚化および確認用）
             cropped_gray = cv2.cvtColor(cropped_image, cv2.COLOR_BGR2GRAY)
             cropped_equalized = cv2.equalizeHist(cropped_gray)
 

@@ -3,20 +3,40 @@ from image_cropper import ImageCropper
 
 
 class ImageProcessor:
+    """
+    画像処理の統合インターフェースを提供するクラス
+    
+    顔検出とクロップ処理を組み合わせた統合APIを提供し、
+    アプリケーションからの利用を簡素化します。
+    """
 
     def __init__(self):
+        """
+        ImageProcessorクラスの初期化メソッド
+        
+        顔検出とクロップ処理のためのオブジェクトを初期化します。
+        
+        引数:
+            なし
+            
+        戻り値:
+            なし
+        """
         self.face_detector = FaceDetector()
         self.image_cropper = ImageCropper()
 
     def crop_image(self, original_image, debug_mode=False):
         """
-        画像を顔検出に基づいてクロップする関数
+        画像を顔検出に基づいてクロップするメソッド
         
-        Args:
-            original_image: 入力画像
-            debug_mode: デバッグモード
+        指定された画像に顔検出を適用し、最適な位置でクロップします。
+        このメソッドはImageCropperクラスの同名メソッドに処理を委譲します。
+        
+        引数:
+            original_image: 入力画像（OpenCV形式のndarray）
+            debug_mode: デバッグモードフラグ（True=可視化情報を含む画像を返す）
             
-        Returns:
+        戻り値:
             クロップされた画像または、デバッグモードの場合は可視化された画像
         """
         return self.image_cropper.crop_image(original_image, debug_mode)

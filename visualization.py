@@ -2,32 +2,41 @@ import cv2
 
 
 class Visualizer:
+    """
+    画像の可視化機能を提供するクラス
+    
+    デバッグ情報（顔の検出結果、三分割グリッド線など）を
+    画像上に描画するための機能を提供します。
+    """
 
     def draw_debug_info(self, cropped_image, faces, crop_left, crop_top, face_center_x,
                         face_center_y, cropped_faces):
         """
-        デバッグ情報を画像に描画する関数
+        デバッグ情報を画像に描画するメソッド
         
-        Args:
-            cropped_image: クロップされた画像
-            faces: 元の画像で検出された顔のリスト
+        クロップされた画像に三分割線、検出された顔の矩形、
+        顔の中心点などのデバッグ情報を描画します。
+        
+        引数:
+            cropped_image: クロップされた画像（OpenCV形式のndarray）
+            faces: 元の画像で検出された顔のリスト（各顔は(x, y, w, h)のタプル）
             crop_left: クロップ開始位置（左）
             crop_top: クロップ開始位置（上）
             face_center_x: 元画像内の顔の中心X座標
             face_center_y: 元画像内の顔の中心Y座標
             cropped_faces: クロップした画像内で検出された顔のリスト
             
-        Returns:
+        戻り値:
             デバッグ情報が描画された画像
         """
         # デバッグ用：三分割のグリッドと顔矩形を表示
         display_image = cropped_image.copy()
         h, w = display_image.shape[:2]
 
-        # 縦線
+        # 縦線（三分割の垂直線）
         cv2.line(display_image, (w // 3, 0), (w // 3, h), (0, 255, 0), 1)
         cv2.line(display_image, (2 * w // 3, 0), (2 * w // 3, h), (0, 255, 0), 1)
-        # 横線
+        # 横線（三分割の水平線）
         cv2.line(display_image, (0, h // 3), (w, h // 3), (0, 255, 0), 1)
         cv2.line(display_image, (0, 2 * h // 3), (w, 2 * h // 3), (0, 255, 0), 1)
 

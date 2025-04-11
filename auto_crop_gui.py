@@ -10,20 +10,34 @@ from PyQt5.QtGui import QImage, QPixmap
 from PyQt5.QtWidgets import (QApplication, QFileDialog, QFrame, QHBoxLayout, QLabel, QMainWindow,
                              QMessageBox, QPushButton, QVBoxLayout, QWidget)
 
-# Import the ImageProcessor class
+# ImageProcessorクラスのインポート
 from image_processor import ImageProcessor
 
 
 class FaceCropApp(QMainWindow):
+    """
+    顔認識自動クロップツールのGUIアプリケーションクラス
+    
+    顔認識を使用して画像をクロップし、16:9のアスペクト比に調整するアプリケーション。
+    """
 
     def __init__(self):
+        """
+        FaceCropAppクラスの初期化メソッド
+        
+        引数:
+            なし
+            
+        戻り値:
+            なし
+        """
         super().__init__()
 
         self.title = '顔認識自動クロップツール'
-        self.original_image = None
-        self.cropped_image = None
+        self.original_image = None  # 元画像を保持する変数
+        self.cropped_image = None  # クロップ後の画像を保持する変数
 
-        # Initialize the ImageProcessor class
+        # ImageProcessorクラスの初期化
         self.image_processor = ImageProcessor()
 
         # デバッグモードの追加（三分割線を表示するかどうか）
@@ -32,8 +46,17 @@ class FaceCropApp(QMainWindow):
         self.init_ui()
 
     def init_ui(self):
+        """
+        UIコンポーネントの初期化と配置を行うメソッド
+        
+        引数:
+            なし
+            
+        戻り値:
+            なし
+        """
         self.setWindowTitle(self.title)
-        self.setGeometry(100, 100, 1000, 600)
+        self.setGeometry(100, 100, 1000, 600)  # ウィンドウのサイズと位置を設定
 
         # メインウィジェットとレイアウト
         main_widget = QWidget()
@@ -69,12 +92,12 @@ class FaceCropApp(QMainWindow):
         # クロップボタン
         self.crop_button = QPushButton('顔認識してクロップ')
         self.crop_button.clicked.connect(self.crop_image)
-        self.crop_button.setEnabled(False)
+        self.crop_button.setEnabled(False)  # 初期状態では無効化
 
         # 保存ボタン
         self.save_button = QPushButton('クロップ画像を保存')
         self.save_button.clicked.connect(self.save_image)
-        self.save_button.setEnabled(False)
+        self.save_button.setEnabled(False)  # 初期状態では無効化
 
         button_layout.addWidget(self.load_button)
         button_layout.addWidget(self.crop_button)
@@ -88,6 +111,15 @@ class FaceCropApp(QMainWindow):
         self.setCentralWidget(main_widget)
 
     def load_image(self):
+        """
+        画像ファイルを選択して読み込むメソッド
+        
+        引数:
+            なし
+            
+        戻り値:
+            なし
+        """
         options = QFileDialog.Options()
         filepath, _ = QFileDialog.getOpenFileName(self,
                                                   "画像ファイルを開く",
@@ -97,6 +129,7 @@ class FaceCropApp(QMainWindow):
 
         if filepath:
             try:
+                # 画像を読み込み
                 self.original_image = cv2.imread(filepath)
                 if self.original_image is None:
                     raise Exception("画像の読み込みに失敗しました")
@@ -124,11 +157,20 @@ class FaceCropApp(QMainWindow):
                 QMessageBox.critical(self, "エラー", f"画像の読み込みエラー: {str(e)}")
 
     def crop_image(self):
+        """
+        読み込まれた画像に顔認識を適用してクロップするメソッド
+        
+        引数:
+            なし
+            
+        戻り値:
+            なし
+        """
         if self.original_image is None:
             return
 
         try:
-            # Use the ImageProcessor to crop the image
+            # ImageProcessorを使用して画像をクロップ
             self.cropped_image = self.image_processor.crop_image(self.original_image,
                                                                  self.debug_mode)
 
@@ -136,7 +178,7 @@ class FaceCropApp(QMainWindow):
                 QMessageBox.warning(self, "警告", "画像から顔を検出できませんでした")
                 return
 
-            # Convert the cropped image to QPixmap and display it
+            # クロップした画像をQPixmapに変換して表示
             height, width, channels = self.cropped_image.shape
             bytes_per_line = channels * width
             q_img = QImage(self.cropped_image.data, width, height, bytes_per_line,
@@ -148,7 +190,7 @@ class FaceCropApp(QMainWindow):
                                           Qt.SmoothTransformation)
             self.cropped_image_label.setPixmap(scaled_pixmap)
 
-            # Enable the save button
+            # 保存ボタンを有効化
             self.save_button.setEnabled(True)
 
         except Exception as e:
@@ -157,6 +199,15 @@ class FaceCropApp(QMainWindow):
             QMessageBox.critical(self, "エラー", error_message)
 
     def save_image(self):
+        """
+        クロップされた画像をファイルに保存するメソッド
+        
+        引数:
+            なし
+            
+        戻り値:
+            なし
+        """
         if self.cropped_image is None:
             return
 
@@ -172,7 +223,7 @@ class FaceCropApp(QMainWindow):
                 # ファイル拡張子の確認と追加
                 _, ext = os.path.splitext(filepath)
                 if not ext:
-                    filepath += '.jpg'
+                    filepath += '.jpg'  # デフォルトはJPEG形式
 
                 # 画像を保存
                 cv2.imwrite(filepath, self.cropped_image)
@@ -183,6 +234,15 @@ class FaceCropApp(QMainWindow):
 
 
 def main():
+    """
+    アプリケーションのメイン関数
+    
+    引数:
+        なし
+        
+    戻り値:
+        なし
+    """
     app = QApplication(sys.argv)
     window = FaceCropApp()
     window.show()

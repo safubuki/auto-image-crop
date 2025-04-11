@@ -7,8 +7,23 @@ import numpy as np
 
 
 class FaceDetector:
+    """
+    顔と目の検出を行うクラス
+    
+    複数の顔検出アルゴリズム（MediaPipe、OpenCV Cascade、Dlib）を使用して
+    画像から顔と目を検出する機能を提供します。
+    """
 
     def __init__(self):
+        """
+        FaceDetectorクラスの初期化メソッド
+        
+        引数:
+            なし
+            
+        戻り値:
+            なし
+        """
         # MediaPipeの顔検出モジュールを初期化
         self.mp_face_detection = mp.solutions.face_detection
         self.mp_drawing = mp.solutions.drawing_utils
@@ -54,13 +69,16 @@ class FaceDetector:
 
     def detect_faces(self, image):
         """
-        画像から顔を検出する関数
+        画像から顔を検出するメソッド
         
-        Args:
-            image: 入力画像
+        MediaPipeを使用して画像から顔を検出し、検出された顔の領域を返します。
+        重複する検出結果は統合され、顔領域は適切に拡張されます。
+        
+        引数:
+            image: 入力画像（OpenCV形式のndarray）
             
-        Returns:
-            検出された顔のリスト(x, y, w, h)
+        戻り値:
+            検出された顔のリスト、各顔は(x, y, w, h)のタプルで表される
         """
         if image is None:
             return []
@@ -88,11 +106,13 @@ class FaceDetector:
             for (x, y, w, h) in all_faces:
                 is_unique = True
                 for (ux, uy, uw, uh) in unique_faces:
+                    # 顔の中心点間の距離を計算
                     center_dist = np.sqrt((x + w / 2 - ux - uw / 2)**2 +
                                           (y + h / 2 - uy - uh / 2)**2)
                     overlap_threshold = (w + uw) / 4
                     if center_dist < overlap_threshold:
                         is_unique = False
+                        # より大きい顔を採用
                         if w * h > uw * uh:
                             unique_faces.remove((ux, uy, uw, uh))
                             unique_faces.append((x, y, w, h))
@@ -114,14 +134,20 @@ class FaceDetector:
 
     def detect_eyes(self, image, face_x, face_y, face_w, face_h):
         """
-        顔領域内で目を検出する関数
+        顔領域内で目を検出するメソッド
         
-        Args:
-            image: 入力画像
-            face_x, face_y, face_w, face_h: 顔の座標と大きさ
+        指定された顔領域内で目を検出し、検出された目と推定された目の高さ位置を返します。
+        
+        引数:
+            image: 入力画像（OpenCV形式のndarray）
+            face_x: 顔のx座標
+            face_y: 顔のy座標
+            face_w: 顔の幅
+            face_h: 顔の高さ
             
-        Returns:
-            検出された目のリスト(x, y, w, h)と推定された目の高さの位置
+        戻り値:
+            検出された目のリストと推定された目の高さ位置のタプル
+            目のリストは各目が(x, y, w, h)のタプルで表される
         """
         if image is None:
             return [], None

@@ -121,21 +121,8 @@ class ImageCropper:
             cropped_image = original_image[int(crop_top):int(crop_bottom),
                                            int(crop_left):int(crop_right)].copy()
 
-            # クロップした画像内で顔を再検出（視覚化および確認用）
-            cropped_gray = cv2.cvtColor(cropped_image, cv2.COLOR_BGR2GRAY)
-            cropped_equalized = cv2.equalizeHist(cropped_gray)
-
-            # 複数の分類器を使用（LBP分類器がある場合のみ使用）
-            cropped_faces = self.face_detector.face_cascade_default.detectMultiScale(
-                cropped_gray, 1.3, 5)
-            cropped_faces_lbp = []
-            if self.face_detector.lbp_face_cascade is not None:
-                cropped_faces_lbp = self.face_detector.lbp_face_cascade.detectMultiScale(
-                    cropped_equalized, 1.2, 5)
-
-            # 結果を結合
-            if len(cropped_faces_lbp) > 0:
-                cropped_faces = np.vstack((cropped_faces, cropped_faces_lbp))
+            # MediaPipeで再検出
+            cropped_faces = self.face_detector.detect_faces(cropped_image)
 
             if debug_mode:
                 # デバッグモードの場合は、可視化した画像を返す

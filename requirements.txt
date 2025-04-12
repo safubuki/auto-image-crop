@@ -1,8 +1,7 @@
 wheel>=0.45.1
-cmake>=4.0.0
 numpy>=2.2.0
 pillow>=11.0.0
 PyQt5>=5.15.0
 opencv-python>=4.11.0
 opencv-contrib-python>=4.11.0
-dlib>=19.24.0
+mediapipe>=0.10.7

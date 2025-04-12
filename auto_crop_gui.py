@@ -35,12 +35,13 @@ class FaceCropApp(QMainWindow):
 
         self.title = '顔認識自動クロップツール'
         self.original_image = None  # 元画像を保持する変数
-        self.cropped_image = None  # クロップ後の画像を保持する変数
+        self.cropped_image = None  # クロップ後の画像を保持する変数（保存用）
+        self.display_image = None  # 表示用の画像（デバッグ情報付き）
 
         # ImageProcessorクラスの初期化
         self.image_processor = ImageProcessor()
 
-        # デバッグモードの追加（三分割線を表示するかどうか）
+        # デバッグモードの追加（表示用）
         self.debug_mode = True
 
         self.init_ui()
@@ -150,6 +151,7 @@ class FaceCropApp(QMainWindow):
                 # クロップボタンを有効に
                 self.crop_button.setEnabled(True)
                 self.cropped_image = None
+                self.display_image = None
                 self.cropped_image_label.setText("クロップ後の画像がここに表示されます")
                 self.save_button.setEnabled(False)
 
@@ -170,18 +172,25 @@ class FaceCropApp(QMainWindow):
             return
 
         try:
-            # ImageProcessorを使用して画像をクロップ
+            # 保存用の画像（デバッグ情報なし）
             self.cropped_image = self.image_processor.crop_image(self.original_image,
-                                                                 self.debug_mode)
+                                                                 debug_mode=False)
 
             if self.cropped_image is None:
                 QMessageBox.warning(self, "警告", "画像から顔を検出できませんでした")
                 return
 
-            # クロップした画像をQPixmapに変換して表示
-            height, width, channels = self.cropped_image.shape
+            # 表示用の画像（デバッグ情報あり）
+            if self.debug_mode:
+                self.display_image = self.image_processor.crop_image(self.original_image,
+                                                                     debug_mode=True)
+            else:
+                self.display_image = self.cropped_image.copy()
+
+            # 表示用の画像をQPixmapに変換して表示
+            height, width, channels = self.display_image.shape
             bytes_per_line = channels * width
-            q_img = QImage(self.cropped_image.data, width, height, bytes_per_line,
+            q_img = QImage(self.display_image.data, width, height, bytes_per_line,
                            QImage.Format_BGR888)
             pixmap = QPixmap.fromImage(q_img)
 
@@ -225,7 +234,7 @@ class FaceCropApp(QMainWindow):
                 if not ext:
                     filepath += '.jpg'  # デフォルトはJPEG形式
 
-                # 画像を保存
+                # デバッグ情報のない画像を保存
                 cv2.imwrite(filepath, self.cropped_image)
                 QMessageBox.information(self, "成功", f"画像を保存しました: {filepath}")
 

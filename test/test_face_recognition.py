@@ -145,11 +145,17 @@ class TestFaceRecognition:
             image_path = os.path.join(test_images_path, image_file)
             image = cv2.imread(image_path)
 
-            # 画像をクロップ
-            cropped_image = image_processor.crop_image(image, debug_mode=False)
+            # 画像をクロップ - debug_modeが新しいコードでは辞書を返すので調整
+            cropped_result = image_processor.crop_image(image, debug_mode=False)
 
             # クロップ結果が生成されていることを確認
-            assert cropped_image is not None, f"画像 {image_file} のクロップに失敗しました"
+            assert cropped_result is not None, f"画像 {image_file} のクロップに失敗しました"
+
+            # 最新のコードでは、debug_modeがFalseの場合はndarray、Trueの場合は辞書が返る
+            if isinstance(cropped_result, dict):
+                cropped_image = cropped_result.get('cropped_with_grid', None)
+            else:
+                cropped_image = cropped_result
 
             # クロップされた画像のアスペクト比が約16:9であることを確認
             height, width = cropped_image.shape[:2]
@@ -168,123 +174,53 @@ class TestFaceRecognition:
             else:
                 print(f"  クロップ画像はテスト後に破棄されます（メモリ上のみで処理）")
 
-    def test_individual_face_detection_engines(self, test_images_path):
+    def test_mediapipe_detection(self, face_detector, test_images_path):
         """
-        各顔認識エンジンを個別にテストし、性能を評価する
+        MediaPipe顔検出エンジンのテスト
         
         引数:
+            face_detector: FaceDetectorのインスタンス
             test_images_path: テスト画像フォルダのパス
             
         戻り値:
             なし
         """
-        print("\n===== 各顔認識エンジンの評価テスト =====")
+        print("\n===== MediaPipe顔検出テスト =====")
         image_files = [
             f for f in os.listdir(test_images_path) if f.lower().endswith(('.jpg', '.jpeg', '.png'))
         ]
 
-        # テスト対象の顔認識エンジン
-        engines = [
-            "mediapipe", "haar_default", "haar_alt", "haar_alt2", "lbp", "dlib", "opencv_dnn"
-        ]
-
-        # 各エンジンの結果を格納する辞書
-        results = {
-            engine: {
-                "detected_faces": 0,
-                "total_images": len(image_files),
-                "time": 0
-            } for engine in engines
-        }
-
-        # テスト専用のFaceDetectorを作成
-        detector = FaceDetector()
+        detected_count = 0
+        total_images = len(image_files)
+        total_time = 0
 
         for image_file in image_files:
             image_path = os.path.join(test_images_path, image_file)
             image = cv2.imread(image_path)
             print(f"\n画像: {image_file}")
 
-            # グレースケールに変換（複数のエンジンで使用）
-            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+            # MediaPipeで顔検出
+            start_time = time.time()
+            faces = face_detector.detect_faces(image)
+            elapsed_time = time.time() - start_time
+            total_time += elapsed_time
 
-            # 各エンジンでテスト
-            for engine in engines:
-                faces = []
-                start_time = time.time()
+            # 顔が検出されたかどうか
+            if len(faces) > 0:
+                detected_count += 1
+                status = "✓"
+            else:
+                status = "✗"
 
-                # MediaPipe
-                if engine == "mediapipe":
-                    # MediaPipeを直接使わず、FaceDetectorのメソッドを使用
-                    rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-                    results_mp = detector.face_detection.process(rgb_image)
-                    if results_mp.detections:
-                        for detection in results_mp.detections:
-                            bboxC = detection.location_data.relative_bounding_box
-                            ih, iw, _ = image.shape
-                            x, y, w, h = (int(bboxC.xmin * iw), int(bboxC.ymin * ih),
-                                          int(bboxC.width * iw), int(bboxC.height * ih))
-                            faces.append((x, y, w, h))
+            print(f"  {status} MediaPipe: {len(faces)}個の顔を検出 ({elapsed_time:.3f}秒)")
 
-                # OpenCV Haar Cascade - default
-                elif engine == "haar_default":
-                    faces = detector.face_cascade_default.detectMultiScale(gray, 1.3, 5)
-
-                # OpenCV Haar Cascade - alt
-                elif engine == "haar_alt":
-                    faces = detector.face_cascade_alt.detectMultiScale(gray, 1.3, 5)
-
-                # OpenCV Haar Cascade - alt2
-                elif engine == "haar_alt2":
-                    faces = detector.face_cascade_alt2.detectMultiScale(gray, 1.3, 5)
-
-                # OpenCV LBP Cascade
-                elif engine == "lbp" and detector.lbp_face_cascade is not None:
-                    faces = detector.lbp_face_cascade.detectMultiScale(gray, 1.3, 5)
-
-                # Dlib HOG
-                elif engine == "dlib":
-                    dlib_faces = detector.dlib_face_detector(gray, 1)
-                    for face in dlib_faces:
-                        x, y = face.left(), face.top()
-                        w, h = face.right() - x, face.bottom() - y
-                        faces.append((x, y, w, h))
-
-                # OpenCV DNN
-                elif engine == "opencv_dnn" and detector.dnn_face_detector is not None:
-                    blob = cv2.dnn.blobFromImage(cv2.resize(image, (300, 300)), 1.0, (300, 300),
-                                                 (104.0, 177.0, 123.0))
-                    detector.dnn_face_detector.setInput(blob)
-                    detections = detector.dnn_face_detector.forward()
-
-                    for i in range(detections.shape[2]):
-                        confidence = detections[0, 0, i, 2]
-                        if confidence > 0.5:  # 信頼度閾値
-                            box = detections[0, 0, i, 3:7] * [
-                                image.shape[1], image.shape[0], image.shape[1], image.shape[0]
-                            ]
-                            (x, y, x2, y2) = box.astype("int")
-                            w, h = x2 - x, y2 - y
-                            faces.append((x, y, w, h))
-
-                elapsed_time = time.time() - start_time
-                results[engine]["time"] += elapsed_time
-
-                # 顔が検出されたかどうか
-                if len(faces) > 0:
-                    results[engine]["detected_faces"] += 1
-                    status = "✓"
-                else:
-                    status = "✗"
-
-                print(f"  {status} {engine}: {len(faces)}個の顔を検出 ({elapsed_time:.3f}秒)")
+            for i, (x, y, w, h) in enumerate(faces):
+                print(f"    - 顔 {i+1}: 位置({x},{y}), サイズ({w}x{h})")
 
         # 結果のサマリーを表示
-        print("\n===== 顔認識エンジンの評価結果 =====")
-        print(f"{'エンジン名':<15} {'検出率':<10} {'平均処理時間':<15}")
-        print("-" * 40)
+        detection_rate = (detected_count / total_images) * 100
+        avg_time = total_time / total_images
 
-        for engine, data in results.items():
-            detection_rate = (data["detected_faces"] / data["total_images"]) * 100
-            avg_time = data["time"] / data["total_images"]
-            print(f"{engine:<15} {detection_rate:>5.1f}% {avg_time:>12.3f}秒")
+        print("\n===== MediaPipe顔検出の評価結果 =====")
+        print(f"検出率: {detection_rate:.1f}% ({detected_count}/{total_images})")
+        print(f"平均処理時間: {avg_time:.3f}秒")

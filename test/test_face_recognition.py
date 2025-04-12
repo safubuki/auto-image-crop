@@ -1,8 +1,12 @@
 import os
+import sys
 import time
 
 import cv2
 import pytest
+
+# srcディレクトリをPythonパスに追加
+sys.path.append(os.path.join(os.path.dirname(os.path.dirname(__file__)), 'src'))
 
 from face_detector import FaceDetector
 from image_processor import ImageProcessor
@@ -50,9 +54,9 @@ class TestFaceRecognition:
         戻り値:
             テスト画像フォルダの絶対パス
         """
-        # 現在のスクリプトのディレクトリからの相対パスで取得
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-        return os.path.join(base_dir, "test_images")
+        # プロジェクトのルートディレクトリを取得
+        root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        return os.path.join(root_dir, "test_images")
 
     def test_image_loading(self, test_images_path):
         """

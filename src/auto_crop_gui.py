@@ -2,9 +2,7 @@ import os
 import sys
 
 import cv2
-import dlib
 import mediapipe as mp
-import numpy as np
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QImage, QPixmap
 from PyQt5.QtWidgets import (QApplication, QFileDialog, QFrame, QHBoxLayout, QLabel, QMainWindow,

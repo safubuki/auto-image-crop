@@ -244,10 +244,22 @@ class ImageCropper:
                 # デバッグモードの場合は、可視化した画像を返す
                 from visualization import Visualizer
                 visualizer = Visualizer()
-                display_image = visualizer.draw_debug_info(cropped_image, faces, crop_left,
-                                                           crop_top, face_center_x, face_center_y,
-                                                           cropped_faces, self.last_scored_faces)
-                return display_image
+
+                # 元画像に顔情報を描画
+                original_with_faces = visualizer.draw_face_info(original_image.copy(), faces,
+                                                                self.last_scored_faces)
+
+                # クロップ後の画像に三分割線を描画
+                cropped_with_grid = visualizer.draw_debug_info(cropped_image, faces, crop_left,
+                                                               crop_top, face_center_x,
+                                                               face_center_y, cropped_faces,
+                                                               self.last_scored_faces)
+
+                # 元の画像の矩形+スコア情報と、クロップ後のグリッド線を別々に返す
+                return {
+                    'original_with_faces': original_with_faces,
+                    'cropped_with_grid': cropped_with_grid
+                }
             else:
                 return cropped_image
 

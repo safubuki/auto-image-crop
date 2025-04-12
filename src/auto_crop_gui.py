@@ -178,24 +178,45 @@ class FaceCropApp(QMainWindow):
                 QMessageBox.warning(self, "警告", "画像から顔を検出できませんでした")
                 return
 
-            # 表示用の画像（デバッグ情報あり）
+            # デバッグモードで顔情報と三分割線を表示
             if self.debug_mode:
-                self.display_image = self.image_processor.crop_image(self.original_image,
-                                                                     debug_mode=True)
+                # 新しいデバッグ情報の取得（元画像の顔情報とクロップ後の画像のグリッド線）
+                debug_images = self.image_processor.crop_image(self.original_image, debug_mode=True)
+
+                # 元画像に顔情報を表示
+                original_with_faces = debug_images['original_with_faces']
+                height, width, channels = original_with_faces.shape
+                bytes_per_line = channels * width
+                q_img = QImage(original_with_faces.data, width, height, bytes_per_line,
+                               QImage.Format_BGR888)
+                pixmap = QPixmap.fromImage(q_img)
+                scaled_pixmap = pixmap.scaled(self.original_image_label.width(),
+                                              self.original_image_label.height(),
+                                              Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                self.original_image_label.setPixmap(scaled_pixmap)
+
+                # クロップ後の画像に三分割線を表示
+                cropped_with_grid = debug_images['cropped_with_grid']
+                height, width, channels = cropped_with_grid.shape
+                bytes_per_line = channels * width
+                q_img = QImage(cropped_with_grid.data, width, height, bytes_per_line,
+                               QImage.Format_BGR888)
+                pixmap = QPixmap.fromImage(q_img)
+                scaled_pixmap = pixmap.scaled(self.cropped_image_label.width(),
+                                              self.cropped_image_label.height(), Qt.KeepAspectRatio,
+                                              Qt.SmoothTransformation)
+                self.cropped_image_label.setPixmap(scaled_pixmap)
             else:
-                self.display_image = self.cropped_image.copy()
-
-            # 表示用の画像をQPixmapに変換して表示
-            height, width, channels = self.display_image.shape
-            bytes_per_line = channels * width
-            q_img = QImage(self.display_image.data, width, height, bytes_per_line,
-                           QImage.Format_BGR888)
-            pixmap = QPixmap.fromImage(q_img)
-
-            scaled_pixmap = pixmap.scaled(self.cropped_image_label.width(),
-                                          self.cropped_image_label.height(), Qt.KeepAspectRatio,
-                                          Qt.SmoothTransformation)
-            self.cropped_image_label.setPixmap(scaled_pixmap)
+                # デバッグモードでない場合は通常のクロップ画像を表示
+                height, width, channels = self.cropped_image.shape
+                bytes_per_line = channels * width
+                q_img = QImage(self.cropped_image.data, width, height, bytes_per_line,
+                               QImage.Format_BGR888)
+                pixmap = QPixmap.fromImage(q_img)
+                scaled_pixmap = pixmap.scaled(self.cropped_image_label.width(),
+                                              self.cropped_image_label.height(), Qt.KeepAspectRatio,
+                                              Qt.SmoothTransformation)
+                self.cropped_image_label.setPixmap(scaled_pixmap)
 
             # 保存ボタンを有効化
             self.save_button.setEnabled(True)

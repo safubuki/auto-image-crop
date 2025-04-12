@@ -29,6 +29,9 @@ class ImageCropper:
         self.weight_center = 0.4  # 中央度の重み（中央に近い顔を優先）
         self.weight_sharpness = 0.2  # 鮮明度の重み（鮮明な顔を優先）
 
+        # 最後に評価した顔のスコア情報
+        self.last_scored_faces = []
+
     def select_best_face(self, image, faces):
         """
         複数の顔から最適な顔を選択するメソッド
@@ -48,6 +51,13 @@ class ImageCropper:
 
         if len(faces) == 1:
             # 顔が1つしかない場合は選択の必要なし
+            self.last_scored_faces = [{
+                'face': faces[0],
+                'score': 1.0,
+                'size_score': 1.0,
+                'center_score': 1.0,
+                'sharpness_score': 1.0
+            }]
             return faces[0]
 
         # 画像の中心座標を計算
@@ -110,6 +120,9 @@ class ImageCropper:
 
         # スコアの降順でソート
         scored_faces.sort(key=lambda x: x['score'], reverse=True)
+
+        # スコア情報を保存（可視化用）
+        self.last_scored_faces = scored_faces
 
         # デバッグ情報を出力
         print(f"検出された顔の数: {len(faces)}")
@@ -233,7 +246,7 @@ class ImageCropper:
                 visualizer = Visualizer()
                 display_image = visualizer.draw_debug_info(cropped_image, faces, crop_left,
                                                            crop_top, face_center_x, face_center_y,
-                                                           cropped_faces)
+                                                           cropped_faces, self.last_scored_faces)
                 return display_image
             else:
                 return cropped_image

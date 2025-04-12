@@ -24,6 +24,119 @@ class ImageCropper:
         """
         self.face_detector = FaceDetector()
 
+        # スコアリング用の重み付け係数（各要素の重要度）
+        self.weight_size = 0.4  # 顔サイズの重み（大きい顔を優先）
+        self.weight_center = 0.4  # 中央度の重み（中央に近い顔を優先）
+        self.weight_sharpness = 0.2  # 鮮明度の重み（鮮明な顔を優先）
+
+        # 最後に評価した顔のスコア情報
+        self.last_scored_faces = []
+
+    def select_best_face(self, image, faces):
+        """
+        複数の顔から最適な顔を選択するメソッド
+        
+        「最も大きい顔」「中央に近い顔」「顔領域の鮮明度」の3つの要素を
+        スコアリングして最も適切な顔を選択します。
+        
+        引数:
+            image: 入力画像（OpenCV形式のndarray）
+            faces: 検出された顔のリスト [(x, y, w, h), ...]
+            
+        戻り値:
+            最適な顔 (x, y, w, h)
+        """
+        if len(faces) == 0:
+            return None
+
+        if len(faces) == 1:
+            # 顔が1つしかない場合は選択の必要なし
+            self.last_scored_faces = [{
+                'face': faces[0],
+                'score': 1.0,
+                'size_score': 1.0,
+                'center_score': 1.0,
+                'sharpness_score': 1.0
+            }]
+            return faces[0]
+
+        # 画像の中心座標を計算
+        img_height, img_width = image.shape[:2]
+        img_center_x = img_width // 2
+        img_center_y = img_height // 2
+
+        # 最大のサイズ、最大距離、最大鮮明度を求めるための初期値
+        max_size = 0
+        max_dist = 0
+        max_sharpness = 0.1  # ゼロ除算を避けるため小さな値を初期値とする
+
+        # 各顔について評価値を計算するための情報を収集
+        face_metrics = []
+
+        for face in faces:
+            x, y, w, h = face
+
+            # 1. サイズ評価（顔の面積）
+            size = w * h
+            max_size = max(max_size, size)
+
+            # 2. 中央からの距離評価（距離が近いほど良い）
+            face_center_x = x + w // 2
+            face_center_y = y + h // 2
+            dist_from_center = np.sqrt((face_center_x - img_center_x)**2 +
+                                       (face_center_y - img_center_y)**2)
+            max_dist = max(max_dist, dist_from_center)
+
+            # 3. 鮮明度評価
+            sharpness = self.face_detector.evaluate_face_sharpness(image, face)
+            max_sharpness = max(max_sharpness, sharpness)
+
+            face_metrics.append({
+                'face': face,
+                'size': size,
+                'dist_from_center': dist_from_center,
+                'sharpness': sharpness
+            })
+
+        # 各顔のスコアを正規化して計算
+        scored_faces = []
+        for metrics in face_metrics:
+            # 正規化（各メトリクスを0～1の範囲に変換）
+            norm_size = metrics['size'] / max_size  # 大きいほど良い
+            norm_center = 1.0 - (metrics['dist_from_center'] / max_dist)  # 中央に近いほど良い
+            norm_sharpness = metrics['sharpness'] / max_sharpness  # 鮮明なほど良い
+
+            # 重み付けして合計スコアを計算
+            total_score = (self.weight_size * norm_size + self.weight_center * norm_center +
+                           self.weight_sharpness * norm_sharpness)
+
+            scored_faces.append({
+                'face': metrics['face'],
+                'score': total_score,
+                'size_score': norm_size,
+                'center_score': norm_center,
+                'sharpness_score': norm_sharpness
+            })
+
+        # スコアの降順でソート
+        scored_faces.sort(key=lambda x: x['score'], reverse=True)
+
+        # スコア情報を保存（可視化用）
+        self.last_scored_faces = scored_faces
+
+        # デバッグ情報を出力
+        print(f"検出された顔の数: {len(faces)}")
+        for i, face_data in enumerate(scored_faces):
+            face = face_data['face']
+            print(f"顔 {i+1}: 位置({face[0]},{face[1]}), サイズ({face[2]}x{face[3]})")
+            print(f"  スコア: {face_data['score']:.3f} "
+                  f"(サイズ: {face_data['size_score']:.3f}, "
+                  f"中央度: {face_data['center_score']:.3f}, "
+                  f"鮮明度: {face_data['sharpness_score']:.3f})")
+
+        # 最もスコアの高い顔を返す
+        return scored_faces[0]['face']
+
     def crop_image(self, original_image, debug_mode=False):
         """
         顔検出に基づいて画像をクロップするメソッド
@@ -49,9 +162,12 @@ class ImageCropper:
             if len(faces) == 0:
                 return None
 
-            # 最も大きい顔を使用（複数ある場合）
-            faces = sorted(faces, key=lambda x: x[2] * x[3], reverse=True)
-            x, y, w, h = faces[0]
+            # 複合的な評価に基づいて最適な顔を選択
+            best_face = self.select_best_face(original_image, faces)
+            if best_face is None:
+                return None
+
+            x, y, w, h = best_face
 
             # 元画像のサイズを取得
             img_height, img_width = original_image.shape[:2]
@@ -128,10 +244,22 @@ class ImageCropper:
                 # デバッグモードの場合は、可視化した画像を返す
                 from visualization import Visualizer
                 visualizer = Visualizer()
-                display_image = visualizer.draw_debug_info(cropped_image, faces, crop_left,
-                                                           crop_top, face_center_x, face_center_y,
-                                                           cropped_faces)
-                return display_image
+
+                # 元画像に顔情報を描画
+                original_with_faces = visualizer.draw_face_info(original_image.copy(), faces,
+                                                                self.last_scored_faces)
+
+                # クロップ後の画像に三分割線を描画
+                cropped_with_grid = visualizer.draw_debug_info(cropped_image, faces, crop_left,
+                                                               crop_top, face_center_x,
+                                                               face_center_y, cropped_faces,
+                                                               self.last_scored_faces)
+
+                # 元の画像の矩形+スコア情報と、クロップ後のグリッド線を別々に返す
+                return {
+                    'original_with_faces': original_with_faces,
+                    'cropped_with_grid': cropped_with_grid
+                }
             else:
                 return cropped_image
 

@@ -130,6 +130,11 @@ total_score = (0.4 × size_score) + (0.4 × center_score) + (0.2 × sharpness_sc
 
 ### 視覚的フィードバック機能
 
+<div align="center">
+  <img src="doc_images/app_img2.png" alt="視覚的フィードバック例" width="600"/><br>
+  <em>視覚的フィードバック表示の例</em>
+</div>
+
 - **顔の矩形表示**：
   - クロップの基準となった主要な顔：太い赤色の矩形（線幅2）で表示
   - その他の検出された顔：灰色の矩形（線幅2）で表示

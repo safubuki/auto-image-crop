@@ -1,8 +1,10 @@
 import os
 import sys
+from datetime import datetime
 
 import cv2
 import mediapipe as mp
+import numpy as np
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QImage, QPixmap
 from PyQt5.QtWidgets import (QApplication, QFileDialog, QFrame, QHBoxLayout, QLabel, QMainWindow,
@@ -10,6 +12,16 @@ from PyQt5.QtWidgets import (QApplication, QFileDialog, QFrame, QHBoxLayout, QLa
 
 # ImageProcessorクラスのインポート
 from image_processor import ImageProcessor
+
+
+def imread_unicode(path):
+    """日本語パス対応のOpenCV画像読込"""
+    try:
+        stream = np.fromfile(path, dtype=np.uint8)
+        img = cv2.imdecode(stream, cv2.IMREAD_COLOR)
+        return img
+    except Exception:
+        return None
 
 
 class FaceCropApp(QMainWindow):
@@ -42,6 +54,13 @@ class FaceCropApp(QMainWindow):
         # デバッグモードの追加（表示用）
         self.debug_mode = True
 
+        # 一括処理用の状態変数
+        self.image_paths = []
+        self.original_images = []
+        self.cropped_images = []
+        self.debug_images = []  # 追加: デバッグ用画像セット
+        self.current_index = 0
+
         self.init_ui()
 
     def init_ui(self):
@@ -55,15 +74,13 @@ class FaceCropApp(QMainWindow):
             なし
         """
         self.setWindowTitle(self.title)
-        self.setGeometry(100, 100, 1000, 600)  # ウィンドウのサイズと位置を設定
+        self.setGeometry(100, 100, 900, 520)
 
-        # メインウィジェットとレイアウト
         main_widget = QWidget()
         main_layout = QVBoxLayout()
 
         # 画像表示エリア
         image_layout = QHBoxLayout()
-
         # 元画像表示ラベル
         self.original_image_label = QLabel()
         self.original_image_label.setFrameStyle(QFrame.Box)
@@ -76,189 +93,199 @@ class FaceCropApp(QMainWindow):
         self.cropped_image_label.setFrameStyle(QFrame.Box)
         self.cropped_image_label.setAlignment(Qt.AlignCenter)
         self.cropped_image_label.setText("クロップ後の画像がここに表示されます")
-        self.cropped_image_label.setMinimumSize(400, 225)  # 16:9のアスペクト比
+        self.cropped_image_label.setMinimumSize(400, 225)
 
         image_layout.addWidget(self.original_image_label)
         image_layout.addWidget(self.cropped_image_label)
 
-        # ボタンエリア
+        # --- ボタンレイアウト (読み込み、ナビゲーション、保存を同一ラインに) ---
         button_layout = QHBoxLayout()
+        self.batch_load_button = QPushButton('一括で画像を読み込む')
+        self.batch_load_button.clicked.connect(self.batch_load_images)
+        self.prev_button = QPushButton('前へ')
+        self.prev_button.clicked.connect(self.show_prev_image)
+        self.prev_button.setEnabled(False)
+        self.next_button = QPushButton('次へ')
+        self.next_button.clicked.connect(self.show_next_image)
+        self.next_button.setEnabled(False)
+        self.batch_save_button = QPushButton('一括でクロップ画像を保存')
+        self.batch_save_button.clicked.connect(self.batch_save_images)
+        self.batch_save_button.setEnabled(False)
 
-        # 画像読み込みボタン
-        self.load_button = QPushButton('画像を読み込む')
-        self.load_button.clicked.connect(self.load_image)
+        button_layout.addWidget(self.batch_load_button)
+        button_layout.addStretch(1)  # スペーサー
+        button_layout.addWidget(self.prev_button)
+        button_layout.addWidget(self.next_button)
+        button_layout.addStretch(1)  # スペーサー
+        button_layout.addWidget(self.batch_save_button)
 
-        # クロップボタン
-        self.crop_button = QPushButton('顔認識してクロップ')
-        self.crop_button.clicked.connect(self.crop_image)
-        self.crop_button.setEnabled(False)  # 初期状態では無効化
-
-        # 保存ボタン
-        self.save_button = QPushButton('クロップ画像を保存')
-        self.save_button.clicked.connect(self.save_image)
-        self.save_button.setEnabled(False)  # 初期状態では無効化
-
-        button_layout.addWidget(self.load_button)
-        button_layout.addWidget(self.crop_button)
-        button_layout.addWidget(self.save_button)
+        # 情報表示用ラベル
+        self.info_label = QLabel("")
+        self.info_label.setAlignment(Qt.AlignCenter)
 
         # レイアウトをメインウィジェットに追加
-        main_layout.addLayout(image_layout)
-        main_layout.addLayout(button_layout)
+        main_layout.addLayout(image_layout)  # 画像表示
+        main_layout.addLayout(button_layout)  # 統合されたボタンレイアウト
+        main_layout.addWidget(self.info_label)  # 情報ラベル
+        main_layout.setSpacing(8)
 
         main_widget.setLayout(main_layout)
         self.setCentralWidget(main_widget)
 
-    def load_image(self):
+    def batch_load_images(self):
         """
-        画像ファイルを選択して読み込むメソッド
-        
-        引数:
-            なし
-            
-        戻り値:
-            なし
+        一括で画像を選択して読み込む
         """
         options = QFileDialog.Options()
-        filepath, _ = QFileDialog.getOpenFileName(self,
-                                                  "画像ファイルを開く",
-                                                  "",
-                                                  "画像ファイル (*.jpg *.jpeg *.png *.bmp);;すべてのファイル (*)",
-                                                  options=options)
-
-        if filepath:
-            try:
-                # 画像を読み込み
-                self.original_image = cv2.imread(filepath)
-                if self.original_image is None:
-                    raise Exception("画像の読み込みに失敗しました")
-
-                # 画像をQImageに変換して表示
-                height, width, channels = self.original_image.shape
-                bytes_per_line = channels * width
-                q_img = QImage(self.original_image.data, width, height, bytes_per_line,
-                               QImage.Format_BGR888)
-                pixmap = QPixmap.fromImage(q_img)
-
-                # 元画像ラベルのサイズに合わせてスケーリング
-                scaled_pixmap = pixmap.scaled(self.original_image_label.width(),
-                                              self.original_image_label.height(),
-                                              Qt.KeepAspectRatio, Qt.SmoothTransformation)
-                self.original_image_label.setPixmap(scaled_pixmap)
-
-                # クロップボタンを有効に
-                self.crop_button.setEnabled(True)
-                self.cropped_image = None
-                self.display_image = None
-                self.cropped_image_label.setText("クロップ後の画像がここに表示されます")
-                self.save_button.setEnabled(False)
-
-            except Exception as e:
-                QMessageBox.critical(self, "エラー", f"画像の読み込みエラー: {str(e)}")
-
-    def crop_image(self):
-        """
-        読み込まれた画像に顔認識を適用してクロップするメソッド
-        
-        引数:
-            なし
-            
-        戻り値:
-            なし
-        """
-        if self.original_image is None:
-            return
-
-        try:
-            # 保存用の画像（デバッグ情報なし）
-            self.cropped_image = self.image_processor.crop_image(self.original_image,
-                                                                 debug_mode=False)
-
-            if self.cropped_image is None:
-                QMessageBox.warning(self, "警告", "画像から顔を検出できませんでした")
+        files, _ = QFileDialog.getOpenFileNames(self,
+                                                "画像ファイルを一括で開く",
+                                                "",
+                                                "画像ファイル (*.jpg *.jpeg *.png *.bmp);;すべてのファイル (*)",
+                                                options=options)
+        if files:
+            self.image_paths = files
+            self.original_images = []
+            self.cropped_images = []
+            self.debug_images = []  # 追加: デバッグ用画像セット
+            self.current_index = 0
+            failed_files = []
+            for path in self.image_paths:
+                img = imread_unicode(path)
+                if img is not None:
+                    self.original_images.append(img)
+                    # デバッグ情報付きでクロップ
+                    debug_result = self.image_processor.crop_image(img, debug_mode=True)
+                    if isinstance(debug_result, dict):
+                        # デバッグ画像セット
+                        self.debug_images.append(debug_result)
+                        # クロップ画像本体
+                        cropped = debug_result.get('cropped_with_grid', None)
+                        self.cropped_images.append(cropped)
+                    else:
+                        # 万一dictでなければ通常通り
+                        self.debug_images.append(None)
+                        self.cropped_images.append(debug_result)
+                else:
+                    failed_files.append(path)
+            if len(self.original_images) == 0:
+                QMessageBox.warning(self, "警告", "画像の読み込みに失敗しました")
                 return
+            self.info_label.setText(f"{len(self.original_images)}枚の画像を読み込みました")
+            self.show_current_image()
+            self.update_navigation_buttons()
+            self.batch_save_button.setEnabled(True)
+        else:
+            self.info_label.setText("画像が選択されませんでした")
 
-            # デバッグモードで顔情報と三分割線を表示
-            if self.debug_mode:
-                # 新しいデバッグ情報の取得（元画像の顔情報とクロップ後の画像のグリッド線）
-                debug_images = self.image_processor.crop_image(self.original_image, debug_mode=True)
-
-                # 元画像に顔情報を表示
-                original_with_faces = debug_images['original_with_faces']
-                height, width, channels = original_with_faces.shape
-                bytes_per_line = channels * width
-                q_img = QImage(original_with_faces.data, width, height, bytes_per_line,
-                               QImage.Format_BGR888)
-                pixmap = QPixmap.fromImage(q_img)
-                scaled_pixmap = pixmap.scaled(self.original_image_label.width(),
-                                              self.original_image_label.height(),
-                                              Qt.KeepAspectRatio, Qt.SmoothTransformation)
-                self.original_image_label.setPixmap(scaled_pixmap)
-
-                # クロップ後の画像に三分割線を表示
-                cropped_with_grid = debug_images['cropped_with_grid']
-                height, width, channels = cropped_with_grid.shape
-                bytes_per_line = channels * width
-                q_img = QImage(cropped_with_grid.data, width, height, bytes_per_line,
-                               QImage.Format_BGR888)
-                pixmap = QPixmap.fromImage(q_img)
-                scaled_pixmap = pixmap.scaled(self.cropped_image_label.width(),
-                                              self.cropped_image_label.height(), Qt.KeepAspectRatio,
-                                              Qt.SmoothTransformation)
-                self.cropped_image_label.setPixmap(scaled_pixmap)
-            else:
-                # デバッグモードでない場合は通常のクロップ画像を表示
-                height, width, channels = self.cropped_image.shape
-                bytes_per_line = channels * width
-                q_img = QImage(self.cropped_image.data, width, height, bytes_per_line,
-                               QImage.Format_BGR888)
-                pixmap = QPixmap.fromImage(q_img)
-                scaled_pixmap = pixmap.scaled(self.cropped_image_label.width(),
-                                              self.cropped_image_label.height(), Qt.KeepAspectRatio,
-                                              Qt.SmoothTransformation)
-                self.cropped_image_label.setPixmap(scaled_pixmap)
-
-            # 保存ボタンを有効化
-            self.save_button.setEnabled(True)
-
-        except Exception as e:
-            import traceback
-            error_message = f"クロップ処理エラー: {str(e)}\n{traceback.format_exc()}"
-            QMessageBox.critical(self, "エラー", error_message)
-
-    def save_image(self):
+    def show_current_image(self):
         """
-        クロップされた画像をファイルに保存するメソッド
-        
-        引数:
-            なし
-            
-        戻り値:
-            なし
+        現在のインデックスの画像を表示
         """
-        if self.cropped_image is None:
+        if not self.original_images or not self.cropped_images:
             return
+        idx = self.current_index
+        debug = self.debug_images[idx] if hasattr(self,
+                                                  "debug_images") and self.debug_images else None
 
-        options = QFileDialog.Options()
-        filepath, _ = QFileDialog.getSaveFileName(self,
-                                                  "クロップした画像を保存",
-                                                  "",
-                                                  "JPEGファイル (*.jpg);;PNGファイル (*.png);;すべてのファイル (*)",
-                                                  options=options)
+        # 元画像表示
+        if debug and 'original_with_faces' in debug:
+            orig = debug['original_with_faces']
+        else:
+            orig = self.original_images[idx]
+        # QPixmapに変換し、アスペクト比を維持してスケーリング
+        height, width, channels = orig.shape
+        bytes_per_line = channels * width
+        q_img = QImage(orig.data, width, height, bytes_per_line, QImage.Format_BGR888)
+        pixmap = QPixmap.fromImage(q_img)
+        scaled_pixmap = pixmap.scaled(self.original_image_label.size(), Qt.KeepAspectRatio,
+                                      Qt.SmoothTransformation)
+        self.original_image_label.setPixmap(scaled_pixmap)
 
-        if filepath:
-            try:
-                # ファイル拡張子の確認と追加
-                _, ext = os.path.splitext(filepath)
-                if not ext:
-                    filepath += '.jpg'  # デフォルトはJPEG形式
+        # クロップ画像表示
+        if debug and 'cropped_with_grid' in debug:
+            cropped = debug['cropped_with_grid']
+        else:
+            cropped = self.cropped_images[idx]
+        if cropped is not None:
+            # QPixmapに変換し、アスペクト比を維持してスケーリング
+            height, width, channels = cropped.shape
+            bytes_per_line = channels * width
+            q_img = QImage(cropped.data, width, height, bytes_per_line, QImage.Format_BGR888)
+            pixmap = QPixmap.fromImage(q_img)
+            scaled_pixmap = pixmap.scaled(self.cropped_image_label.size(), Qt.KeepAspectRatio,
+                                          Qt.SmoothTransformation)
+            self.cropped_image_label.setPixmap(scaled_pixmap)
+            self.info_label.setText(f"{idx+1}/{len(self.cropped_images)}")
+        else:
+            self.cropped_image_label.setText("クロップ失敗")
+            self.info_label.setText(f"{idx+1}/{len(self.cropped_images)} (クロップ失敗)")
 
-                # デバッグ情報のない画像を保存
-                cv2.imwrite(filepath, self.cropped_image)
-                QMessageBox.information(self, "成功", f"画像を保存しました: {filepath}")
+    def show_next_image(self):
+        """
+        次の画像を表示
+        """
+        if self.current_index < len(self.original_images) - 1:
+            self.current_index += 1
+            self.show_current_image()
+            self.update_navigation_buttons()
 
-            except Exception as e:
-                QMessageBox.critical(self, "エラー", f"画像の保存エラー: {str(e)}")
+    def show_prev_image(self):
+        """
+        前の画像を表示
+        """
+        if self.current_index > 0:
+            self.current_index -= 1
+            self.show_current_image()
+            self.update_navigation_buttons()
+
+    def update_navigation_buttons(self):
+        """
+        ナビゲーションボタンの有効/無効を更新
+        """
+        total = len(self.original_images)
+        self.prev_button.setEnabled(self.current_index > 0)
+        self.next_button.setEnabled(self.current_index < total - 1)
+        self.batch_save_button.setEnabled(total > 0)
+
+    def batch_save_images(self):
+        """
+        一括でクロップ画像を保存
+        """
+        if not self.cropped_images:
+            QMessageBox.warning(self, "警告", "保存する画像がありません")
+            return
+        folder = QFileDialog.getExistingDirectory(self, "保存先フォルダを選択")
+        if not folder:
+            return
+        now = datetime.now()
+        prefix = now.strftime("%H%M%S")
+        count = 1
+        for i, img in enumerate(self.cropped_images):
+            if img is not None:
+                # 元画像から再度クロップ（debug_mode=False）で保存
+                orig_img = self.original_images[i]
+                cropped_clean = self.image_processor.crop_image(orig_img, debug_mode=False)
+                filename = f"{prefix}_{count}.jpg"
+                path = os.path.join(folder, filename)
+                # 日本語パス対応で保存
+                try:
+                    ext = os.path.splitext(filename)[1].lower()
+                    if ext in [".jpg", ".jpeg"]:
+                        ret, buf = cv2.imencode('.jpg', cropped_clean)
+                    elif ext == ".png":
+                        ret, buf = cv2.imencode('.png', cropped_clean)
+                    else:
+                        ret, buf = cv2.imencode('.jpg', cropped_clean)
+                    if ret:
+                        buf.tofile(path)
+                    else:
+                        raise Exception("画像エンコード失敗")
+                except Exception as e:
+                    QMessageBox.warning(self, "警告", f"画像の保存に失敗しました: {path}\n{str(e)}")
+                count += 1
+        # 標準のQMessageBoxではボタンの厳密な中央配置は保証されません。
+        # 通常、単一ボタンの場合は中央に表示されます。
+        QMessageBox.information(self, "完了", "全てのクロップが完了しました")
 
 
 def main():

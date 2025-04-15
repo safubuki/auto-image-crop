@@ -20,7 +20,8 @@ def imread_unicode(path):
         stream = np.fromfile(path, dtype=np.uint8)
         img = cv2.imdecode(stream, cv2.IMREAD_COLOR)
         return img
-    except Exception:
+    except (IOError, cv2.error):
+        # Handle file reading or OpenCV decoding errors
         return None
 
 
@@ -43,7 +44,7 @@ class FaceCropApp(QMainWindow):
         """
         super().__init__()
 
-        self.title = '顔認識自動クロップツール'
+        self.title = "顔認識自動クロップツール"
         self.original_image = None  # 元画像を保持する変数
         self.cropped_image = None  # クロップ後の画像を保持する変数（保存用）
         self.display_image = None  # 表示用の画像（デバッグ情報付き）
@@ -100,15 +101,15 @@ class FaceCropApp(QMainWindow):
 
         # --- ボタンレイアウト (読み込み、ナビゲーション、保存を同一ラインに) ---
         button_layout = QHBoxLayout()
-        self.batch_load_button = QPushButton('一括で画像を読み込む')
+        self.batch_load_button = QPushButton("一括で画像を読み込む")
         self.batch_load_button.clicked.connect(self.batch_load_images)
-        self.prev_button = QPushButton('前へ')
+        self.prev_button = QPushButton("前へ")
         self.prev_button.clicked.connect(self.show_prev_image)
         self.prev_button.setEnabled(False)
-        self.next_button = QPushButton('次へ')
+        self.next_button = QPushButton("次へ")
         self.next_button.clicked.connect(self.show_next_image)
         self.next_button.setEnabled(False)
-        self.batch_save_button = QPushButton('一括でクロップ画像を保存')
+        self.batch_save_button = QPushButton("一括でクロップ画像を保存")
         self.batch_save_button.clicked.connect(self.batch_save_images)
         self.batch_save_button.setEnabled(False)
 
@@ -159,7 +160,7 @@ class FaceCropApp(QMainWindow):
                         # デバッグ画像セット
                         self.debug_images.append(debug_result)
                         # クロップ画像本体
-                        cropped = debug_result.get('cropped_with_grid', None)
+                        cropped = debug_result.get("cropped_with_grid", None)
                         self.cropped_images.append(cropped)
                     else:
                         # 万一dictでなければ通常通り
@@ -188,8 +189,8 @@ class FaceCropApp(QMainWindow):
                                                   "debug_images") and self.debug_images else None
 
         # 元画像表示
-        if debug and 'original_with_faces' in debug:
-            orig = debug['original_with_faces']
+        if debug and "original_with_faces" in debug:
+            orig = debug["original_with_faces"]
         else:
             orig = self.original_images[idx]
         # QPixmapに変換し、アスペクト比を維持してスケーリング
@@ -202,8 +203,8 @@ class FaceCropApp(QMainWindow):
         self.original_image_label.setPixmap(scaled_pixmap)
 
         # クロップ画像表示
-        if debug and 'cropped_with_grid' in debug:
-            cropped = debug['cropped_with_grid']
+        if debug and "cropped_with_grid" in debug:
+            cropped = debug["cropped_with_grid"]
         else:
             cropped = self.cropped_images[idx]
         if cropped is not None:
@@ -271,18 +272,20 @@ class FaceCropApp(QMainWindow):
                 try:
                     ext = os.path.splitext(filename)[1].lower()
                     if ext in [".jpg", ".jpeg"]:
-                        ret, buf = cv2.imencode('.jpg', cropped_clean)
+                        ret, buf = cv2.imencode(".jpg", cropped_clean)
                     elif ext == ".png":
-                        ret, buf = cv2.imencode('.png', cropped_clean)
+                        ret, buf = cv2.imencode(".png", cropped_clean)
                     else:
-                        ret, buf = cv2.imencode('.jpg', cropped_clean)
+                        ret, buf = cv2.imencode(".jpg", cropped_clean)
                     if ret:
                         buf.tofile(path)
                     else:
-                        raise Exception("画像エンコード失敗")
+                        # Raise RuntimeError for encoding failure
+                        raise RuntimeError(f"画像エンコード失敗: {path}")
                 except Exception as e:
                     QMessageBox.warning(self, "警告", f"画像の保存に失敗しました: {path}\n{str(e)}")
                 count += 1
+
         # 標準のQMessageBoxではボタンの厳密な中央配置は保証されません。
         # 通常、単一ボタンの場合は中央に表示されます。
         QMessageBox.information(self, "完了", "全てのクロップが完了しました")
@@ -304,5 +307,5 @@ def main():
     sys.exit(app.exec_())
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

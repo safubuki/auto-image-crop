@@ -8,7 +8,7 @@ import numpy as np
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QImage, QPixmap
 from PyQt5.QtWidgets import (QApplication, QFileDialog, QFrame, QHBoxLayout, QLabel, QMainWindow,
-                             QMessageBox, QPushButton, QVBoxLayout, QWidget)
+                             QMessageBox, QPushButton, QSizePolicy, QVBoxLayout, QWidget)
 
 # ImageProcessorクラスのインポート
 from image_processor import ImageProcessor
@@ -67,67 +67,66 @@ class FaceCropApp(QMainWindow):
     def init_ui(self):
         """
         UIコンポーネントの初期化と配置を行うメソッド
-        
-        引数:
-            なし
-            
-        戻り値:
-            なし
         """
         self.setWindowTitle(self.title)
-        self.setGeometry(100, 100, 900, 520)
 
         main_widget = QWidget()
         main_layout = QVBoxLayout()
 
-        # 画像表示エリア
+        # 画像表示エリア (変更なし)
         image_layout = QHBoxLayout()
-        # 元画像表示ラベル
         self.original_image_label = QLabel()
         self.original_image_label.setFrameStyle(QFrame.Box)
         self.original_image_label.setAlignment(Qt.AlignCenter)
         self.original_image_label.setText("元画像がここに表示されます")
         self.original_image_label.setMinimumSize(400, 400)
+        self.original_image_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
 
-        # クロップ後画像表示ラベル
         self.cropped_image_label = QLabel()
         self.cropped_image_label.setFrameStyle(QFrame.Box)
         self.cropped_image_label.setAlignment(Qt.AlignCenter)
         self.cropped_image_label.setText("クロップ後の画像がここに表示されます")
         self.cropped_image_label.setMinimumSize(400, 225)
+        self.cropped_image_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
 
         image_layout.addWidget(self.original_image_label)
         image_layout.addWidget(self.cropped_image_label)
 
-        # --- ボタンレイアウト (読み込み、ナビゲーション、保存を同一ラインに) ---
-        button_layout = QHBoxLayout()
-        self.batch_load_button = QPushButton("一括で画像を読み込む")
-        self.batch_load_button.clicked.connect(self.batch_load_images)
+        # --- ボタンと情報ラベルのレイアウト ---
+        # ナビゲーションボタンと情報ラベル用の中央レイアウト
+        center_nav_layout = QHBoxLayout()
         self.prev_button = QPushButton("前へ")
         self.prev_button.clicked.connect(self.show_prev_image)
         self.prev_button.setEnabled(False)
+        self.info_label = QLabel("")
+        self.info_label.setAlignment(Qt.AlignCenter)
         self.next_button = QPushButton("次へ")
         self.next_button.clicked.connect(self.show_next_image)
         self.next_button.setEnabled(False)
+
+        center_nav_layout.addWidget(self.prev_button)
+        center_nav_layout.addSpacing(10)  # ボタンとラベルの間に少しスペースを追加
+        center_nav_layout.addWidget(self.info_label)
+        center_nav_layout.addSpacing(10)  # ラベルとボタンの間に少しスペースを追加
+        center_nav_layout.addWidget(self.next_button)
+
+        # 全体のボタンレイアウト
+        button_layout = QHBoxLayout()
+        self.batch_load_button = QPushButton("一括で画像を読み込む")
+        self.batch_load_button.clicked.connect(self.batch_load_images)
         self.batch_save_button = QPushButton("一括でクロップ画像を保存")
         self.batch_save_button.clicked.connect(self.batch_save_images)
         self.batch_save_button.setEnabled(False)
 
         button_layout.addWidget(self.batch_load_button)
-        button_layout.addStretch(1)  # スペーサー
-        button_layout.addWidget(self.prev_button)
-        button_layout.addWidget(self.next_button)
-        button_layout.addStretch(1)  # スペーサー
+        button_layout.addStretch(1)  # 左側のスペーサー
+        button_layout.addLayout(center_nav_layout)  # 中央のナビゲーション要素
+        button_layout.addStretch(1)  # 右側のスペーサー
         button_layout.addWidget(self.batch_save_button)
-
-        # 情報表示用ラベル
-        self.info_label = QLabel("")
-        self.info_label.setAlignment(Qt.AlignCenter)
 
         # レイアウトをメインウィジェットに追加
         main_layout.addLayout(image_layout)  # 画像表示
-        main_layout.addLayout(button_layout)  # 統合されたボタンレイアウト
-        main_layout.addWidget(self.info_label)  # 情報ラベル
+        main_layout.addLayout(button_layout)  # ボタンと情報ラベルの統合レイアウト
         main_layout.setSpacing(8)
 
         main_widget.setLayout(main_layout)
@@ -185,37 +184,55 @@ class FaceCropApp(QMainWindow):
         if not self.original_images or not self.cropped_images:
             return
         idx = self.current_index
-        debug = self.debug_images[idx] if hasattr(self,
-                                                  "debug_images") and self.debug_images else None
+        # idxがdebug_imagesの範囲内か確認
+        debug_info = self.debug_images[idx] if idx < len(self.debug_images) else None
 
         # 元画像表示
-        if debug and "original_with_faces" in debug:
-            orig = debug["original_with_faces"]
-        else:
-            orig = self.original_images[idx]
+        # まずデフォルトの元画像を設定
+        orig = self.original_images[idx]
+        # debug_infoが辞書なら、キーが存在するか安全にチェックして上書き
+        if isinstance(debug_info, dict):
+            orig_with_faces = debug_info.get("original_with_faces")  # .get()を使用
+            if orig_with_faces is not None:
+                orig = orig_with_faces
+
         # QPixmapに変換し、アスペクト比を維持してスケーリング
-        height, width, channels = orig.shape
-        bytes_per_line = channels * width
-        q_img = QImage(orig.data, width, height, bytes_per_line, QImage.Format_BGR888)
-        pixmap = QPixmap.fromImage(q_img)
-        scaled_pixmap = pixmap.scaled(self.original_image_label.size(), Qt.KeepAspectRatio,
-                                      Qt.SmoothTransformation)
-        self.original_image_label.setPixmap(scaled_pixmap)
+        if orig is None:  # まれにorigがNoneになる可能性も考慮
+            self.original_image_label.setText("元画像エラー")
+            # 必要に応じてエラー処理を追加
+        else:
+            height, width, channels = orig.shape
+            bytes_per_line = channels * width
+            q_img = QImage(orig.data, width, height, bytes_per_line, QImage.Format_BGR888)
+            pixmap = QPixmap.fromImage(q_img)
+            if pixmap.isNull():
+                self.original_image_label.setText("元画像表示エラー")
+            else:
+                scaled_pixmap = pixmap.scaled(self.original_image_label.size(), Qt.KeepAspectRatio,
+                                              Qt.SmoothTransformation)
+                self.original_image_label.setPixmap(scaled_pixmap)
 
         # クロップ画像表示
-        if debug and "cropped_with_grid" in debug:
-            cropped = debug["cropped_with_grid"]
-        else:
-            cropped = self.cropped_images[idx]
+        # まずデフォルトのクロップ画像を設定
+        cropped = self.cropped_images[idx]
+        # debug_infoが辞書なら、キーが存在するか安全にチェックして上書き
+        if isinstance(debug_info, dict):
+            cropped_with_grid = debug_info.get("cropped_with_grid")  # .get()を使用
+            if cropped_with_grid is not None:
+                cropped = cropped_with_grid
+
         if cropped is not None:
             # QPixmapに変換し、アスペクト比を維持してスケーリング
             height, width, channels = cropped.shape
             bytes_per_line = channels * width
             q_img = QImage(cropped.data, width, height, bytes_per_line, QImage.Format_BGR888)
             pixmap = QPixmap.fromImage(q_img)
-            scaled_pixmap = pixmap.scaled(self.cropped_image_label.size(), Qt.KeepAspectRatio,
-                                          Qt.SmoothTransformation)
-            self.cropped_image_label.setPixmap(scaled_pixmap)
+            if pixmap.isNull():
+                self.cropped_image_label.setText("クロップ画像表示エラー")
+            else:
+                scaled_pixmap = pixmap.scaled(self.cropped_image_label.size(), Qt.KeepAspectRatio,
+                                              Qt.SmoothTransformation)
+                self.cropped_image_label.setPixmap(scaled_pixmap)
             self.info_label.setText(f"{idx+1}/{len(self.cropped_images)}")
         else:
             self.cropped_image_label.setText("クロップ失敗")
@@ -286,8 +303,6 @@ class FaceCropApp(QMainWindow):
                     QMessageBox.warning(self, "警告", f"画像の保存に失敗しました: {path}\n{str(e)}")
                 count += 1
 
-        # 標準のQMessageBoxではボタンの厳密な中央配置は保証されません。
-        # 通常、単一ボタンの場合は中央に表示されます。
         QMessageBox.information(self, "完了", "全てのクロップが完了しました")
 
 

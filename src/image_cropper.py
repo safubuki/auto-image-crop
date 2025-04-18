@@ -1,7 +1,10 @@
+import traceback
+
 import cv2
 import numpy as np
 
 from face_detector import FaceDetector
+from visualization import Visualizer
 
 
 class ImageCropper:
@@ -127,17 +130,22 @@ class ImageCropper:
         # 最もスコアの高い顔を返す
         return scored_faces[0]['face']
 
-    def crop_image(self, original_image, aspect_ratio_str="16:9", debug_mode=False):
+    def crop_image(self,
+                   original_image,
+                   aspect_ratio_str='16:9',
+                   split_method='thirds',
+                   debug_mode=False):
         """
         顔検出に基づいて画像をクロップするメソッド
 
-        検出された顔の位置と目の位置を基準に、三分割法を適用して
+        検出された顔の位置と目の位置を基準に、三分割法またはファイグリッドを適用して
         最適な位置で画像をクロップします。デバッグモードでは
         グリッド線と検出結果を可視化します。
 
         引数:
             original_image: 入力画像（OpenCV形式のndarray）
-            aspect_ratio_str: 目標のアスペクト比 ("16:9", "9:16", "4:3", "3:4")
+            aspect_ratio_str: 目標のアスペクト比 ('16:9', '9:16', '4:3', '3:4')
+            split_method: 分割方法 ('thirds' または 'phi')
             debug_mode: デバッグモードフラグ（True=可視化情報を含む画像を返す）
 
         戻り値:
@@ -151,12 +159,62 @@ class ImageCropper:
             # 顔検出
             faces = self.face_detector.detect_faces(original_image)
             if len(faces) == 0:
-                return None
+                # 顔がない場合は中央クロップを試みる
+                print("顔が検出されませんでした。中央クロップを試みます。")
+                h_orig, w_orig = original_image.shape[:2]
+                try:
+                    w_ratio, h_ratio = map(int, aspect_ratio_str.split(':'))
+                    target_aspect = w_ratio / h_ratio
+                except ValueError:
+                    target_aspect = 16 / 9  # デフォルト
+
+                target_w, target_h = self._calculate_target_dimensions(
+                    w_orig, h_orig, target_aspect)
+                crop_left = max(0, (w_orig - target_w) // 2)
+                crop_top = max(0, (h_orig - target_h) // 2)
+                cropped_image = original_image[crop_top:min(crop_top + target_h, h_orig),
+                                               crop_left:min(crop_left + target_w, w_orig)]
+                if debug_mode:
+                    return {
+                        'original_with_faces': original_image.copy(),  # 元画像そのまま
+                        'cropped_with_grid': cropped_image.copy(),  # グリッドなし
+                        'cropped_clean': cropped_image.copy(),
+                        'split_method': split_method
+                    }
+                else:
+                    return cropped_image
 
             # 複合的な評価に基づいて最適な顔を選択
             best_face = self.select_best_face(original_image, faces)
             if best_face is None:
-                return None
+                print("最適な顔が見つかりませんでした。")
+                # 顔はあるが最適なものがない場合も中央クロップ
+                h_orig, w_orig = original_image.shape[:2]
+                try:
+                    w_ratio, h_ratio = map(int, aspect_ratio_str.split(':'))
+                    target_aspect = w_ratio / h_ratio
+                except ValueError:
+                    target_aspect = 16 / 9  # デフォルト
+
+                target_w, target_h = self._calculate_target_dimensions(
+                    w_orig, h_orig, target_aspect)
+                crop_left = max(0, (w_orig - target_w) // 2)
+                crop_top = max(0, (h_orig - target_h) // 2)
+                cropped_image = original_image[crop_top:min(crop_top + target_h, h_orig),
+                                               crop_left:min(crop_left + target_w, w_orig)]
+                if debug_mode:
+                    # 元画像には検出された顔を描画
+                    visualizer = Visualizer()
+                    original_with_faces = visualizer.draw_face_info(original_image.copy(), faces,
+                                                                    self.last_scored_faces)
+                    return {
+                        'original_with_faces': original_with_faces,
+                        'cropped_with_grid': cropped_image.copy(),  # グリッドなし
+                        'cropped_clean': cropped_image.copy(),
+                        'split_method': split_method
+                    }
+                else:
+                    return cropped_image
 
             x, y, w, h = best_face
 
@@ -167,8 +225,10 @@ class ImageCropper:
             face_center_x = x + w // 2
             face_center_y = y + h // 2
 
-            # 目の検出
+            # 目の検出 (垂直方向の基準点として使用)
             _, eyes_y = self.face_detector.detect_eyes(original_image, x, y, w, h)
+            # 目の位置が検出できなかった場合は顔の中心Yを使う
+            reference_y = eyes_y if eyes_y is not None else face_center_y
 
             # アスペクト比文字列を数値に変換
             try:
@@ -179,114 +239,130 @@ class ImageCropper:
                 target_aspect_ratio = 16 / 9  # デフォルト
 
             # --- クロップサイズの計算 ---
-            img_aspect_ratio = img_width / img_height
-
-            if img_aspect_ratio > target_aspect_ratio:
-                # 元画像の方が横長 -> 高さを基準に幅を計算
-                crop_height = img_height
-                crop_width = int(crop_height * target_aspect_ratio)
-                # 幅が元画像を超えないように調整
-                if crop_width > img_width:
-                    crop_width = img_width
-                    crop_height = int(crop_width / target_aspect_ratio)
-            else:
-                # 元画像の方が縦長または同じ -> 幅を基準に高さを計算
-                crop_width = img_width
-                crop_height = int(crop_width / target_aspect_ratio)
-                # 高さが元画像を超えないように調整
-                if crop_height > img_height:
-                    crop_height = img_height
-                    crop_width = int(crop_height * target_aspect_ratio)
-
-            # 整数に丸める
-            crop_width = int(round(crop_width))
-            crop_height = int(round(crop_height))
+            crop_width, crop_height = self._calculate_target_dimensions(
+                img_width, img_height, target_aspect_ratio)
 
             # --- クロップ位置の計算 ---
-            # 三分割法の上側のライン位置を計算（クロップ後の上から1/3の位置）
-            top_third_line = crop_height // 3
+            crop_left, crop_top = self._calculate_crop_position(img_width, img_height,
+                                                                face_center_x, reference_y,
+                                                                crop_width, crop_height,
+                                                                split_method)
 
-            # 顔または目が上側の横ラインに来るように調整
-            target_y = eyes_y  # 目の位置または推定位置を使用
-
-            # クロップのトップ位置を計算 (target_yが上から1/3の位置に来るように)
-            crop_top = max(0, target_y - top_third_line)
-
-            # もし画像の下側がはみ出る場合は調整
-            if crop_top + crop_height > img_height:
-                crop_top = max(0, img_height - crop_height)
-
-            # 横方向の中心を顔の中心に合わせる
-            crop_left = max(0, face_center_x - crop_width // 2)
-
-            # もし画像の右側がはみ出る場合は調整
-            if crop_left + crop_width > img_width:
-                crop_left = max(0, img_width - crop_width)
-
-            # 横方向の三分割ラインを計算
-            grid_left = crop_width // 3
-            grid_right = (crop_width * 2) // 3
-
-            # 顔の中心を横方向の近い方の三分割ラインに合わせる調整
-            # 顔の中心位置（クロップ画像内の相対位置）
-            face_rel_x = face_center_x - crop_left
-
-            # どちらのグリッドラインに近いか判定
-            if abs(face_rel_x - grid_left) < abs(face_rel_x - grid_right):
-                # 左の線に近い場合、左の線に合わせる
-                new_crop_left = max(0, face_center_x - grid_left)
-            else:
-                # 右の線に近い場合、右の線に合わせる
-                new_crop_left = max(0, face_center_x - grid_right)
-
-            # 境界チェック
-            if new_crop_left + crop_width > img_width:
-                new_crop_left = max(0, img_width - crop_width)
-
-            # 調整後の左位置を適用
-            crop_left = new_crop_left
-
-            # 最終的なクロップ範囲を設定 (整数に変換)
-            crop_top = int(round(crop_top))
-            crop_left = int(round(crop_left))
             crop_right = min(crop_left + crop_width, img_width)
             crop_bottom = min(crop_top + crop_height, img_height)
 
-            # この範囲で画像をクロップ
             cropped_image = original_image[crop_top:crop_bottom, crop_left:crop_right].copy()
 
-            # クロップ後の画像サイズが意図通りか確認（デバッグ用）
-            # print(f"Cropped size: {cropped_image.shape[1]}x{cropped_image.shape[0]}, Target: {crop_width}x{crop_height}")
-
-            # MediaPipeで再検出（デバッグ表示用）
-            cropped_faces = self.face_detector.detect_faces(cropped_image)
-
             if debug_mode:
-                # デバッグモードの場合は、可視化した画像を返す
-                from visualization import Visualizer
                 visualizer = Visualizer()
 
-                # 元画像に顔情報を描画
                 original_with_faces = visualizer.draw_face_info(original_image.copy(), faces,
                                                                 self.last_scored_faces)
 
-                # クロップ後の画像に三分割線を描画
-                cropped_with_grid = visualizer.draw_debug_info(cropped_image, faces, crop_left,
-                                                               crop_top, face_center_x,
-                                                               face_center_y, cropped_faces,
-                                                               self.last_scored_faces)
+                cropped_with_grid = visualizer.draw_debug_info(cropped_image.copy(),
+                                                               split_method=split_method)
 
-                # 元の画像の矩形+スコア情報と、クロップ後のグリッド線を別々に返す
                 return {
                     'original_with_faces': original_with_faces,
                     'cropped_with_grid': cropped_with_grid,
-                    'cropped_clean': cropped_image  # 保存用にクリーンな画像も返す
+                    'cropped_clean': cropped_image,
+                    'split_method': split_method
                 }
             else:
-                # 通常モードではクロップ画像のみ返す
                 return cropped_image
 
         except Exception as e:
-            import traceback
             print(f"クロップ処理エラー: {str(e)}\n{traceback.format_exc()}")
             return None
+
+    def _calculate_target_dimensions(self, img_width, img_height, target_aspect_ratio):
+        """
+        目標アスペクト比に合わせたクロップサイズを計算
+        """
+        img_aspect_ratio = img_width / img_height
+
+        if img_aspect_ratio > target_aspect_ratio:
+            crop_height = img_height
+            crop_width = int(round(crop_height * target_aspect_ratio))
+            if crop_width > img_width:
+                crop_width = img_width
+                crop_height = int(round(crop_width / target_aspect_ratio))
+        else:
+            crop_width = img_width
+            crop_height = int(round(crop_width / target_aspect_ratio))
+            if crop_height > img_height:
+                crop_height = img_height
+                crop_width = int(round(crop_height * target_aspect_ratio))
+
+        crop_width = max(1, int(round(crop_width)))
+        crop_height = max(1, int(round(crop_height)))
+        return crop_width, crop_height
+
+    def _calculate_crop_position(self,
+                                 img_w,
+                                 img_h,
+                                 face_center_x,
+                                 face_center_y,
+                                 target_w,
+                                 target_h,
+                                 split_method='thirds'):
+        """
+        顔の中心と目標サイズに基づいてクロップ位置を計算する。
+        顔の中心が最も近い分割線に合うように調整する。
+        """
+        # 1. 目の高さを上部1/3またはファイグリッドの上部ラインに合わせる (垂直方向)
+        if split_method == 'thirds':
+            crop_top = max(0, face_center_y - target_h // 3)
+        elif split_method == 'phi':
+            phi = (1 + np.sqrt(5)) / 2
+            top_ratio = 1 / (2 + (phi - 1))
+            crop_top = max(0, face_center_y - int(target_h * top_ratio))
+        else:
+            crop_top = max(0, face_center_y - target_h // 3)
+
+        # 2. 顔の中心を最も近い縦の分割線に合わせる (水平方向)
+        if split_method == 'thirds':
+            line1_target_x = target_w // 3
+            line2_target_x = 2 * target_w // 3
+            crop_left_if_line1 = face_center_x - line1_target_x
+            crop_left_if_line2 = face_center_x - line2_target_x
+            center_crop_left = img_w // 2 - target_w // 2
+            face_x_in_center_crop = face_center_x - center_crop_left
+            if abs(face_x_in_center_crop - line1_target_x) <= abs(face_x_in_center_crop -
+                                                                  line2_target_x):
+                crop_left = crop_left_if_line1
+            else:
+                crop_left = crop_left_if_line2
+        elif split_method == 'phi':
+            phi = (1 + np.sqrt(5)) / 2
+            total_ratio = 2 + (phi - 1)
+            line1_target_x = int(target_w / total_ratio)
+            line2_target_x = int(target_w * (1 + (phi - 1)) / total_ratio)
+            crop_left_if_line1 = face_center_x - line1_target_x
+            crop_left_if_line2 = face_center_x - line2_target_x
+            center_crop_left = img_w // 2 - target_w // 2
+            face_x_in_center_crop = face_center_x - center_crop_left
+            if abs(face_x_in_center_crop - line1_target_x) <= abs(face_x_in_center_crop -
+                                                                  line2_target_x):
+                crop_left = crop_left_if_line1
+            else:
+                crop_left = crop_left_if_line2
+        else:
+            line1_target_x = target_w // 3
+            line2_target_x = 2 * target_w // 3
+            crop_left_if_line1 = face_center_x - line1_target_x
+            crop_left_if_line2 = face_center_x - line2_target_x
+            center_crop_left = img_w // 2 - target_w // 2
+            face_x_in_center_crop = face_center_x - center_crop_left
+            if abs(face_x_in_center_crop - line1_target_x) <= abs(face_x_in_center_crop -
+                                                                  line2_target_x):
+                crop_left = crop_left_if_line1
+            else:
+                crop_left = crop_left_if_line2
+
+        crop_left = int(round(crop_left))
+        crop_top = int(round(crop_top))
+        crop_left = max(0, min(crop_left, img_w - target_w))
+        crop_top = max(0, min(crop_top, img_h - target_h))
+
+        return crop_left, crop_top

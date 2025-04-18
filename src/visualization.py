@@ -10,44 +10,46 @@ class Visualizer:
     画像上に描画するための機能を提供します。
     """
 
-    def draw_debug_info(self,
-                        cropped_image,
-                        faces,
-                        crop_left,
-                        crop_top,
-                        face_center_x,
-                        face_center_y,
-                        cropped_faces,
-                        scored_faces=None):
+    def draw_debug_info(self, cropped_image, split_method='thirds'):  # 分割方法のみ引数として残す
         """
-        デバッグ情報をクロップ後の画像に描画するメソッド
-        
-        クロップされた画像に三分割線を描画します。
-        顔の矩形とスコア情報は表示しません。
-        
-        引数:
-            cropped_image: クロップされた画像（OpenCV形式のndarray）
-            faces: 元の画像で検出された顔のリスト（各顔は(x, y, w, h)のタプル）
-            crop_left: クロップ開始位置（左）
-            crop_top: クロップ開始位置（上）
-            face_center_x: 元画像内の顔の中心X座標
-            face_center_y: 元画像内の顔の中心Y座標
-            cropped_faces: クロップした画像内で検出された顔のリスト
-            scored_faces: 顔のスコア情報のリスト（各要素は辞書型 {face, score, ...}）
-            
-        戻り値:
+        デバッグ情報（分割線）をクロップ後の画像に描画するメソッド
+
+        Args:
+            cropped_image: クロップされた画像
+            split_method (str): 分割方法 ('thirds' または 'phi')
+
+        Returns:
             デバッグ情報が描画された画像
         """
-        # クロップ後の画像にはグリッド線のみ表示
         display_image = cropped_image.copy()
         h, w = display_image.shape[:2]
 
-        # 縦線（三分割の垂直線）
-        cv2.line(display_image, (w // 3, 0), (w // 3, h), (0, 255, 0), 1)
-        cv2.line(display_image, (2 * w // 3, 0), (2 * w // 3, h), (0, 255, 0), 1)
-        # 横線（三分割の水平線）- 修正版
-        cv2.line(display_image, (0, h // 3), (w, h // 3), (0, 255, 0), 1)
-        cv2.line(display_image, (0, 2 * h // 3), (w, 2 * h // 3), (0, 255, 0), 1)
+        # 分割線を描画
+        if split_method == 'thirds':
+            # 三分割法
+            cv2.line(display_image, (w // 3, 0), (w // 3, h), (0, 255, 0), 1)
+            cv2.line(display_image, (2 * w // 3, 0), (2 * w // 3, h), (0, 255, 0), 1)
+            cv2.line(display_image, (0, h // 3), (w, h // 3), (0, 255, 0), 1)
+            cv2.line(display_image, (0, 2 * h // 3), (w, 2 * h // 3), (0, 255, 0), 1)
+        elif split_method == 'phi':
+            # ファイグリッド (黄金比)
+            phi = (1 + np.sqrt(5)) / 2
+            total_ratio = 2 + (phi - 1)
+            line1_x = int(w / total_ratio)
+            line2_x = int(w * (1 + (phi - 1)) / total_ratio)
+            line1_y = int(h / total_ratio)
+            line2_y = int(h * (1 + (phi - 1)) / total_ratio)
+
+            cv2.line(display_image, (line1_x, 0), (line1_x, h), (0, 255, 0), 1)
+            cv2.line(display_image, (line2_x, 0), (line2_x, h), (0, 255, 0), 1)
+            cv2.line(display_image, (0, line1_y), (w, line1_y), (0, 255, 0), 1)
+            cv2.line(display_image, (0, line2_y), (w, line2_y), (0, 255, 0), 1)
+        else:
+            # 不明な場合は三分割法を描画
+            cv2.line(display_image, (w // 3, 0), (w // 3, h), (0, 255, 0), 1)
+            cv2.line(display_image, (2 * w // 3, 0), (2 * w // 3, h), (0, 255, 0), 1)
+            cv2.line(display_image, (0, h // 3), (w, h // 3), (0, 255, 0), 1)
+            cv2.line(display_image, (0, 2 * h // 3), (w, 2 * h // 3), (0, 255, 0), 1)
 
         # クロップ範囲を示す青い枠を追加
         cv2.rectangle(display_image, (0, 0), (w - 1, h - 1), (255, 0, 0), 2)  # 青色の矩形

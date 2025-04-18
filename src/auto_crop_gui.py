@@ -7,8 +7,9 @@ import mediapipe as mp
 import numpy as np
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QImage, QPixmap
-from PyQt5.QtWidgets import (QApplication, QFileDialog, QFrame, QHBoxLayout, QLabel, QMainWindow,
-                             QMessageBox, QPushButton, QSizePolicy, QVBoxLayout, QWidget)
+from PyQt5.QtWidgets import (QApplication, QButtonGroup, QFileDialog, QFrame, QGroupBox,
+                             QHBoxLayout, QLabel, QMainWindow, QMessageBox, QPushButton,
+                             QRadioButton, QSizePolicy, QVBoxLayout, QWidget)
 
 # ImageProcessorクラスのインポート
 from image_processor import ImageProcessor
@@ -29,7 +30,7 @@ class FaceCropApp(QMainWindow):
     """
     顔認識自動クロップツールのGUIアプリケーションクラス
     
-    顔認識を使用して画像をクロップし、16:9のアスペクト比に調整するアプリケーション。
+    顔認識を使用して画像をクロップし、選択されたアスペクト比に調整するアプリケーション。
     """
 
     def __init__(self):
@@ -62,6 +63,11 @@ class FaceCropApp(QMainWindow):
         self.debug_images = []  # 追加: デバッグ用画像セット
         self.current_index = 0
 
+        # アスペクト比の状態
+        self.aspect_ratio_mode = "batch"  # 'batch' or 'individual'
+        self.selected_aspect_ratio = "16:9"  # 一括モード時の値
+        self.individual_aspect_ratios = []  # 個別モード時に画像ごとに保持するリスト
+
         self.init_ui()
 
     def init_ui(self):
@@ -73,7 +79,7 @@ class FaceCropApp(QMainWindow):
         main_widget = QWidget()
         main_layout = QVBoxLayout()
 
-        # 画像表示エリア (変更なし)
+        # --- 画像表示エリア --- (変更なし)
         image_layout = QHBoxLayout()
         self.original_image_label = QLabel()
         self.original_image_label.setFrameStyle(QFrame.Box)
@@ -86,11 +92,52 @@ class FaceCropApp(QMainWindow):
         self.cropped_image_label.setFrameStyle(QFrame.Box)
         self.cropped_image_label.setAlignment(Qt.AlignCenter)
         self.cropped_image_label.setText("クロップ後の画像がここに表示されます")
-        self.cropped_image_label.setMinimumSize(400, 225)
+        self.cropped_image_label.setMinimumSize(400, 225)  # 16:9比率の最小サイズ例
         self.cropped_image_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
 
         image_layout.addWidget(self.original_image_label)
         image_layout.addWidget(self.cropped_image_label)
+
+        # --- アスペクト比設定モードとアスペクト比選択エリア ---
+        settings_layout = QHBoxLayout()
+        mode_group = QGroupBox("アスペクト比設定モード")
+        mode_layout = QHBoxLayout()  # ラジオボタンを横並びに変更
+        self.mode_button_group = QButtonGroup(self)
+        self.batch_mode_radio = QRadioButton("一括")
+        self.batch_mode_radio.setChecked(True)
+        # モード説明用のツールチップ
+        self.batch_mode_radio.setToolTip("一括モード: 全ての画像に同じアスペクト比を適用します。")
+        self.individual_mode_radio = QRadioButton("個別")
+        self.individual_mode_radio.setToolTip("個別モード: 画像ごとにアスペクト比を設定できます。")
+        self.mode_button_group.addButton(self.batch_mode_radio)
+        self.mode_button_group.addButton(self.individual_mode_radio)
+        mode_layout.addWidget(self.batch_mode_radio)
+        mode_layout.addWidget(self.individual_mode_radio)
+        mode_group.setLayout(mode_layout)
+        self.mode_button_group.buttonClicked.connect(self.on_mode_changed)
+        settings_layout.addWidget(mode_group)
+
+        # --- アスペクト比選択ラジオボタン ---
+        aspect_ratio_group = QGroupBox("アスペクト比")
+        aspect_ratio_layout = QHBoxLayout()
+        self.aspect_ratio_button_group = QButtonGroup(self)
+
+        self.aspect_ratio_buttons = {}
+        ratios = ["16:9", "9:16", "4:3", "3:4"]
+        for ratio in ratios:
+            radio_button = QRadioButton(ratio)
+            self.aspect_ratio_button_group.addButton(radio_button)
+            aspect_ratio_layout.addWidget(radio_button)
+            self.aspect_ratio_buttons[ratio] = radio_button
+            if ratio == self.selected_aspect_ratio:
+                radio_button.setChecked(True)
+
+        self.aspect_ratio_button_group.buttonClicked.connect(self.on_aspect_ratio_changed)
+        aspect_ratio_group.setLayout(aspect_ratio_layout)
+        settings_layout.addWidget(aspect_ratio_group)
+        # レイアウトストレッチ: モード(1/4), アスペクト比選択(3/4)
+        settings_layout.setStretch(0, 1)
+        settings_layout.setStretch(1, 3)
 
         # --- ボタンと情報ラベルのレイアウト ---
         # ナビゲーションボタンと情報ラベル用の中央レイアウト
@@ -105,9 +152,9 @@ class FaceCropApp(QMainWindow):
         self.next_button.setEnabled(False)
 
         center_nav_layout.addWidget(self.prev_button)
-        center_nav_layout.addSpacing(10)  # ボタンとラベルの間に少しスペースを追加
+        center_nav_layout.addSpacing(10)
         center_nav_layout.addWidget(self.info_label)
-        center_nav_layout.addSpacing(10)  # ラベルとボタンの間に少しスペースを追加
+        center_nav_layout.addSpacing(10)
         center_nav_layout.addWidget(self.next_button)
 
         # 全体のボタンレイアウト
@@ -119,18 +166,81 @@ class FaceCropApp(QMainWindow):
         self.batch_save_button.setEnabled(False)
 
         button_layout.addWidget(self.batch_load_button)
-        button_layout.addStretch(1)  # 左側のスペーサー
-        button_layout.addLayout(center_nav_layout)  # 中央のナビゲーション要素
-        button_layout.addStretch(1)  # 右側のスペーサー
+        button_layout.addStretch(1)
+        button_layout.addLayout(center_nav_layout)
+        button_layout.addStretch(1)
         button_layout.addWidget(self.batch_save_button)
 
         # レイアウトをメインウィジェットに追加
         main_layout.addLayout(image_layout)  # 画像表示
-        main_layout.addLayout(button_layout)  # ボタンと情報ラベルの統合レイアウト
+        main_layout.addLayout(settings_layout)  # アスペクト比モードと選択
+        main_layout.addLayout(button_layout)  # ボタンと情報ラベル
         main_layout.setSpacing(8)
 
         main_widget.setLayout(main_layout)
         self.setCentralWidget(main_widget)
+
+    def on_mode_changed(self, button):
+        new_mode = "batch" if button == self.batch_mode_radio else "individual"
+        if new_mode == self.aspect_ratio_mode:
+            return
+        self.aspect_ratio_mode = new_mode
+        if not self.original_images:
+            return
+        if new_mode == "individual":
+            # 一括->個別:全画像の個別設定を現在の一括値で初期化
+            self.individual_aspect_ratios = [self.selected_aspect_ratio] * len(self.original_images)
+        else:
+            # 個別->一括:個別設定をクリア
+            self.individual_aspect_ratios.clear()
+        self._update_all_crop_results()
+        self.show_current_image()
+
+    def on_aspect_ratio_changed(self, button):
+        new_ratio = button.text()
+        if self.aspect_ratio_mode == "batch":
+            self.selected_aspect_ratio = new_ratio
+            if self.original_images:
+                self._update_all_crop_results()
+                self.show_current_image()
+        else:
+            idx = self.current_index
+            if 0 <= idx < len(self.individual_aspect_ratios):
+                self.individual_aspect_ratios[idx] = new_ratio
+                self._update_crop_results(idx)
+                self.show_current_image()
+            else:
+                self.selected_aspect_ratio = new_ratio
+
+    def _get_current_aspect_ratio(self, index=None):
+        if self.aspect_ratio_mode == "batch":
+            return self.selected_aspect_ratio
+        idx = self.current_index if index is None else index
+        if 0 <= idx < len(self.individual_aspect_ratios):
+            return self.individual_aspect_ratios[idx]
+        return self.selected_aspect_ratio
+
+    def _update_crop_results(self, index):
+        if not (0 <= index < len(self.original_images)):
+            return
+        img = self.original_images[index]
+        aspect = self._get_current_aspect_ratio(index)
+        result = self.image_processor.crop_image(img, aspect, debug_mode=True)
+        if isinstance(result, dict):
+            self.debug_images[index] = result
+            self.cropped_images[index] = result.get("cropped_clean")
+        else:
+            self.debug_images[index] = None
+            self.cropped_images[index] = None
+
+    def _update_all_crop_results(self):
+        self.debug_images = [None] * len(self.original_images)
+        self.cropped_images = [None] * len(self.original_images)
+        self.individual_aspect_ratios = ([self.selected_aspect_ratio] *
+                                         len(self.original_images) if self.aspect_ratio_mode
+                                         == "individual" else self.individual_aspect_ratios)
+        for i in range(len(self.original_images)):
+            self._update_crop_results(i)
 
     def batch_load_images(self):
         """
@@ -146,31 +256,30 @@ class FaceCropApp(QMainWindow):
             self.image_paths = files
             self.original_images = []
             self.cropped_images = []
-            self.debug_images = []  # 追加: デバッグ用画像セット
+            self.debug_images = []
             self.current_index = 0
             failed_files = []
             for path in self.image_paths:
                 img = imread_unicode(path)
                 if img is not None:
                     self.original_images.append(img)
-                    # デバッグ情報付きでクロップ
-                    debug_result = self.image_processor.crop_image(img, debug_mode=True)
+                    # 現在選択されているアスペクト比でクロップ
+                    debug_result = self.image_processor.crop_image(img,
+                                                                   self.selected_aspect_ratio,
+                                                                   debug_mode=True)
                     if isinstance(debug_result, dict):
-                        # デバッグ画像セット
                         self.debug_images.append(debug_result)
-                        # クロップ画像本体
-                        cropped = debug_result.get("cropped_with_grid", None)
-                        self.cropped_images.append(cropped)
+                        self.cropped_images.append(debug_result.get("cropped_clean", None))
                     else:
-                        # 万一dictでなければ通常通り
                         self.debug_images.append(None)
-                        self.cropped_images.append(debug_result)
+                        self.cropped_images.append(None)
                 else:
                     failed_files.append(path)
             if len(self.original_images) == 0:
                 QMessageBox.warning(self, "警告", "画像の読み込みに失敗しました")
                 return
             self.info_label.setText(f"{len(self.original_images)}枚の画像を読み込みました")
+            self._update_all_crop_results()
             self.show_current_image()
             self.update_navigation_buttons()
             self.batch_save_button.setEnabled(True)
@@ -181,62 +290,71 @@ class FaceCropApp(QMainWindow):
         """
         現在のインデックスの画像を表示
         """
-        if not self.original_images or not self.cropped_images:
+        if not self.original_images or self.current_index >= len(self.original_images):
+            self.original_image_label.setText("元画像なし")
+            self.cropped_image_label.setText("クロップ画像なし")
+            self.info_label.setText("0/0")
             return
+
         idx = self.current_index
-        # idxがdebug_imagesの範囲内か確認
         debug_info = self.debug_images[idx] if idx < len(self.debug_images) else None
 
-        # 元画像表示
-        # まずデフォルトの元画像を設定
+        # --- 元画像表示 ---
         orig = self.original_images[idx]
-        # debug_infoが辞書なら、キーが存在するか安全にチェックして上書き
+        display_orig = orig  # デフォルト
         if isinstance(debug_info, dict):
-            orig_with_faces = debug_info.get("original_with_faces")  # .get()を使用
+            orig_with_faces = debug_info.get("original_with_faces")
             if orig_with_faces is not None:
-                orig = orig_with_faces
+                display_orig = orig_with_faces
 
-        # QPixmapに変換し、アスペクト比を維持してスケーリング
-        if orig is None:  # まれにorigがNoneになる可能性も考慮
-            self.original_image_label.setText("元画像エラー")
-            # 必要に応じてエラー処理を追加
+        if display_orig is not None:
+            self.display_cv_image(self.original_image_label, display_orig)
         else:
-            height, width, channels = orig.shape
-            bytes_per_line = channels * width
-            q_img = QImage(orig.data, width, height, bytes_per_line, QImage.Format_BGR888)
-            pixmap = QPixmap.fromImage(q_img)
-            if pixmap.isNull():
-                self.original_image_label.setText("元画像表示エラー")
-            else:
-                scaled_pixmap = pixmap.scaled(self.original_image_label.size(), Qt.KeepAspectRatio,
-                                              Qt.SmoothTransformation)
-                self.original_image_label.setPixmap(scaled_pixmap)
+            self.original_image_label.setText("元画像エラー")
 
-        # クロップ画像表示
-        # まずデフォルトのクロップ画像を設定
-        cropped = self.cropped_images[idx]
-        # debug_infoが辞書なら、キーが存在するか安全にチェックして上書き
+        # --- クロップ画像表示 ---
+        cropped = self.cropped_images[idx]  # 保存用クリーン画像
+        display_cropped = cropped  # デフォルト
         if isinstance(debug_info, dict):
-            cropped_with_grid = debug_info.get("cropped_with_grid")  # .get()を使用
+            cropped_with_grid = debug_info.get("cropped_with_grid")
             if cropped_with_grid is not None:
-                cropped = cropped_with_grid
+                display_cropped = cropped_with_grid
 
-        if cropped is not None:
-            # QPixmapに変換し、アスペクト比を維持してスケーリング
-            height, width, channels = cropped.shape
-            bytes_per_line = channels * width
-            q_img = QImage(cropped.data, width, height, bytes_per_line, QImage.Format_BGR888)
-            pixmap = QPixmap.fromImage(q_img)
-            if pixmap.isNull():
-                self.cropped_image_label.setText("クロップ画像表示エラー")
-            else:
-                scaled_pixmap = pixmap.scaled(self.cropped_image_label.size(), Qt.KeepAspectRatio,
-                                              Qt.SmoothTransformation)
-                self.cropped_image_label.setPixmap(scaled_pixmap)
-            self.info_label.setText(f"{idx+1}/{len(self.cropped_images)}")
+        if display_cropped is not None:
+            self.display_cv_image(self.cropped_image_label, display_cropped)
+            self.info_label.setText(f"{idx+1}/{len(self.original_images)}")
         else:
             self.cropped_image_label.setText("クロップ失敗")
-            self.info_label.setText(f"{idx+1}/{len(self.cropped_images)} (クロップ失敗)")
+            self.info_label.setText(f"{idx+1}/{len(self.original_images)} (クロップ失敗)")
+
+        # アスペクト比ボタン状態同期
+        current = self._get_current_aspect_ratio()
+        blocked = self.aspect_ratio_button_group.signalsBlocked()
+        self.aspect_ratio_button_group.blockSignals(True)
+        if current in self.aspect_ratio_buttons:
+            self.aspect_ratio_buttons[current].setChecked(True)
+        self.aspect_ratio_button_group.blockSignals(blocked)
+
+    def display_cv_image(self, label, cv_image):
+        """QLabelにOpenCV画像を表示するヘルパー関数"""
+        if cv_image is None:
+            label.setText("画像表示エラー")
+            return
+        try:
+            height, width, channels = cv_image.shape
+            bytes_per_line = channels * width
+            q_img = QImage(cv_image.data, width, height, bytes_per_line, QImage.Format_BGR888)
+            pixmap = QPixmap.fromImage(q_img)
+            if pixmap.isNull():
+                label.setText("Pixmap変換エラー")
+            else:
+                # ラベルのサイズに合わせてスケーリング
+                scaled_pixmap = pixmap.scaled(label.size(), Qt.KeepAspectRatio,
+                                              Qt.SmoothTransformation)
+                label.setPixmap(scaled_pixmap)
+        except Exception as e:
+            print(f"画像表示エラー: {e}")
+            label.setText(f"表示エラー: {e}")
 
     def show_next_image(self):
         """
@@ -276,34 +394,41 @@ class FaceCropApp(QMainWindow):
         if not folder:
             return
         now = datetime.now()
-        prefix = now.strftime("%H%M%S")
+        prefix = now.strftime("%Y%m%d_%H%M%S")  # より詳細なプレフィックス
         count = 1
+        saved_count = 0
+        failed_paths = []
+
         for i, img in enumerate(self.cropped_images):
             if img is not None:
-                # 元画像から再度クロップ（debug_mode=False）で保存
-                orig_img = self.original_images[i]
-                cropped_clean = self.image_processor.crop_image(orig_img, debug_mode=False)
-                filename = f"{prefix}_{count}.jpg"
+                # 元画像のパスからファイル名を取得
+                original_path = self.image_paths[i]
+                base_name, _ = os.path.splitext(os.path.basename(original_path))
+                # 新しいファイル名を作成 (プレフィックス_元の名前_連番.jpg)
+                filename = f"{prefix}_{base_name}_{count}.jpg"  # 保存はJPG形式に統一
                 path = os.path.join(folder, filename)
+
                 # 日本語パス対応で保存
                 try:
-                    ext = os.path.splitext(filename)[1].lower()
-                    if ext in [".jpg", ".jpeg"]:
-                        ret, buf = cv2.imencode(".jpg", cropped_clean)
-                    elif ext == ".png":
-                        ret, buf = cv2.imencode(".png", cropped_clean)
-                    else:
-                        ret, buf = cv2.imencode(".jpg", cropped_clean)
+                    # 保存する画像はデバッグ情報なしのクリーンなもの (self.cropped_images[i])
+                    ret, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 95])  # 高画質で保存
                     if ret:
                         buf.tofile(path)
+                        saved_count += 1
                     else:
-                        # Raise RuntimeError for encoding failure
                         raise RuntimeError(f"画像エンコード失敗: {path}")
                 except Exception as e:
-                    QMessageBox.warning(self, "警告", f"画像の保存に失敗しました: {path}\n{str(e)}")
+                    print(f"画像の保存に失敗しました: {path}\n{str(e)}")
+                    failed_paths.append(path)
                 count += 1
+            else:
+                print(f"インデックス {i} の画像はクロップに失敗したため保存されません。")
+                count += 1  # スキップしても連番は進める
 
-        QMessageBox.information(self, "完了", "全てのクロップが完了しました")
+        if failed_paths:
+            QMessageBox.warning(self, "警告", f"{len(failed_paths)}件の画像の保存に失敗しました。詳細はコンソールを確認してください。")
+        else:
+            QMessageBox.information(self, "完了", f"{saved_count}枚の画像のクロップと保存が完了しました。")
 
 
 def main():

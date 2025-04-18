@@ -124,31 +124,22 @@ class ImageCropper:
         # スコア情報を保存（可視化用）
         self.last_scored_faces = scored_faces
 
-        # デバッグ情報を出力
-        print(f"検出された顔の数: {len(faces)}")
-        for i, face_data in enumerate(scored_faces):
-            face = face_data['face']
-            print(f"顔 {i+1}: 位置({face[0]},{face[1]}), サイズ({face[2]}x{face[3]})")
-            print(f"  スコア: {face_data['score']:.3f} "
-                  f"(サイズ: {face_data['size_score']:.3f}, "
-                  f"中央度: {face_data['center_score']:.3f}, "
-                  f"鮮明度: {face_data['sharpness_score']:.3f})")
-
         # 最もスコアの高い顔を返す
         return scored_faces[0]['face']
 
-    def crop_image(self, original_image, debug_mode=False):
+    def crop_image(self, original_image, aspect_ratio_str="16:9", debug_mode=False):
         """
         顔検出に基づいて画像をクロップするメソッド
-        
+
         検出された顔の位置と目の位置を基準に、三分割法を適用して
         最適な位置で画像をクロップします。デバッグモードでは
         グリッド線と検出結果を可視化します。
-        
+
         引数:
             original_image: 入力画像（OpenCV形式のndarray）
+            aspect_ratio_str: 目標のアスペクト比 ("16:9", "9:16", "4:3", "3:4")
             debug_mode: デバッグモードフラグ（True=可視化情報を含む画像を返す）
-            
+
         戻り値:
             クロップされた画像または、デバッグモードの場合は可視化された画像
             顔が検出できなかった場合はNoneを返す
@@ -179,13 +170,39 @@ class ImageCropper:
             # 目の検出
             _, eyes_y = self.face_detector.detect_eyes(original_image, x, y, w, h)
 
-            # 16:9のアスペクト比で計算
-            target_aspect_ratio = 16 / 9
+            # アスペクト比文字列を数値に変換
+            try:
+                width_ratio, height_ratio = map(int, aspect_ratio_str.split(':'))
+                target_aspect_ratio = width_ratio / height_ratio
+            except ValueError:
+                print(f"無効なアスペクト比文字列: {aspect_ratio_str}. デフォルトの16:9を使用します。")
+                target_aspect_ratio = 16 / 9  # デフォルト
 
-            # 最終的なクロップの高さと幅を決定
-            crop_height = min(img_height, int(img_width / target_aspect_ratio))
-            crop_width = min(img_width, int(crop_height * target_aspect_ratio))
+            # --- クロップサイズの計算 ---
+            img_aspect_ratio = img_width / img_height
 
+            if img_aspect_ratio > target_aspect_ratio:
+                # 元画像の方が横長 -> 高さを基準に幅を計算
+                crop_height = img_height
+                crop_width = int(crop_height * target_aspect_ratio)
+                # 幅が元画像を超えないように調整
+                if crop_width > img_width:
+                    crop_width = img_width
+                    crop_height = int(crop_width / target_aspect_ratio)
+            else:
+                # 元画像の方が縦長または同じ -> 幅を基準に高さを計算
+                crop_width = img_width
+                crop_height = int(crop_width / target_aspect_ratio)
+                # 高さが元画像を超えないように調整
+                if crop_height > img_height:
+                    crop_height = img_height
+                    crop_width = int(crop_height * target_aspect_ratio)
+
+            # 整数に丸める
+            crop_width = int(round(crop_width))
+            crop_height = int(round(crop_height))
+
+            # --- クロップ位置の計算 ---
             # 三分割法の上側のライン位置を計算（クロップ後の上から1/3の位置）
             top_third_line = crop_height // 3
 
@@ -229,15 +246,19 @@ class ImageCropper:
             # 調整後の左位置を適用
             crop_left = new_crop_left
 
-            # 最終的なクロップ範囲を設定
+            # 最終的なクロップ範囲を設定 (整数に変換)
+            crop_top = int(round(crop_top))
+            crop_left = int(round(crop_left))
             crop_right = min(crop_left + crop_width, img_width)
             crop_bottom = min(crop_top + crop_height, img_height)
 
             # この範囲で画像をクロップ
-            cropped_image = original_image[int(crop_top):int(crop_bottom),
-                                           int(crop_left):int(crop_right)].copy()
+            cropped_image = original_image[crop_top:crop_bottom, crop_left:crop_right].copy()
 
-            # MediaPipeで再検出
+            # クロップ後の画像サイズが意図通りか確認（デバッグ用）
+            # print(f"Cropped size: {cropped_image.shape[1]}x{cropped_image.shape[0]}, Target: {crop_width}x{crop_height}")
+
+            # MediaPipeで再検出（デバッグ表示用）
             cropped_faces = self.face_detector.detect_faces(cropped_image)
 
             if debug_mode:
@@ -258,9 +279,11 @@ class ImageCropper:
                 # 元の画像の矩形+スコア情報と、クロップ後のグリッド線を別々に返す
                 return {
                     'original_with_faces': original_with_faces,
-                    'cropped_with_grid': cropped_with_grid
+                    'cropped_with_grid': cropped_with_grid,
+                    'cropped_clean': cropped_image  # 保存用にクリーンな画像も返す
                 }
             else:
+                # 通常モードではクロップ画像のみ返す
                 return cropped_image
 
         except Exception as e:

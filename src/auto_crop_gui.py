@@ -98,10 +98,10 @@ class FaceCropApp(QMainWindow):
         image_layout.addWidget(self.original_image_label)
         image_layout.addWidget(self.cropped_image_label)
 
-        # --- アスペクト比モード選択 ---
-        settings_layout = QVBoxLayout()
-        mode_group = QGroupBox("アスペクト比モード")
-        mode_layout = QVBoxLayout()
+        # --- アスペクト比設定モードとアスペクト比選択エリア ---
+        settings_layout = QHBoxLayout()
+        mode_group = QGroupBox("アスペクト比設定モード")
+        mode_layout = QHBoxLayout()  # ラジオボタンを横並びに変更
         self.mode_button_group = QButtonGroup(self)
         self.batch_mode_radio = QRadioButton("一括")
         self.batch_mode_radio.setChecked(True)
@@ -132,6 +132,9 @@ class FaceCropApp(QMainWindow):
         self.aspect_ratio_button_group.buttonClicked.connect(self.on_aspect_ratio_changed)
         aspect_ratio_group.setLayout(aspect_ratio_layout)
         settings_layout.addWidget(aspect_ratio_group)
+        # レイアウトストレッチ: モード(1/4), アスペクト比選択(3/4)
+        settings_layout.setStretch(0, 1)
+        settings_layout.setStretch(1, 3)
 
         # --- ボタンと情報ラベルのレイアウト ---
         # ナビゲーションボタンと情報ラベル用の中央レイアウト

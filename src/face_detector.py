@@ -32,40 +32,81 @@ class FaceDetector:
         """
         画像から顔を検出するメソッド
         
-        MediaPipeを使用して画像から顔を検出し、検出された顔の領域を返します。
+        MediaPipeを使用して画像から顔を検出し、検出された顔の領域と
+        推定された顔の向き（ヨー方向）を返します。
         顔領域は適切に拡張されます。
         
         引数:
             image: 入力画像（OpenCV形式のndarray）
             
         戻り値:
-            検出された顔のリスト、各顔は(x, y, w, h)のタプルで表される
+            検出された顔のリスト、各顔は(x, y, w, h, yaw_direction)のタプルで表される
+            yaw_direction は 'left', 'right', 'front' のいずれか
         """
         if image is None:
             return []
 
         # MediaPipeで顔検出
         results = self.face_detection.process(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
-        mediapipe_faces = []
+        detected_faces_info = []
         if results.detections:
+            ih, iw, _ = image.shape
             for detection in results.detections:
                 bboxC = detection.location_data.relative_bounding_box
-                ih, iw, _ = image.shape
                 x, y, w, h = (int(bboxC.xmin * iw), int(bboxC.ymin * ih), int(bboxC.width * iw),
                               int(bboxC.height * ih))
-                mediapipe_faces.append((x, y, w, h))
 
-        # 顔領域を拡張（10%拡張）
-        expanded_faces = []
-        for (x, y, w, h) in mediapipe_faces:
-            padding = int(0.1 * min(w, h))
-            x = max(0, x - padding)
-            y = max(0, y - padding)
-            w = min(image.shape[1] - x, w + 2 * padding)
-            h = min(image.shape[0] - y, h + 2 * padding)
-            expanded_faces.append((x, y, w, h))
+                # 顔向き推定 (ヨー方向)
+                yaw_direction = 'front'  # デフォルトは正面
+                try:
+                    # キーポイントを取得 (0:右目, 1:左目, 2:鼻先)
+                    kp_right_eye = detection.location_data.relative_keypoints[0]
+                    kp_left_eye = detection.location_data.relative_keypoints[1]
+                    kp_nose_tip = detection.location_data.relative_keypoints[2]
 
-        return expanded_faces
+                    # x座標のみ使用
+                    re_x = kp_right_eye.x
+                    le_x = kp_left_eye.x
+                    nt_x = kp_nose_tip.x
+
+                    # 目の中心と鼻先の水平方向のずれを計算
+                    eye_center_x = (re_x + le_x) / 2.0
+                    nose_offset = nt_x - eye_center_x
+
+                    # 目の間の距離で正規化 (ゼロ除算回避)
+                    eye_dist = abs(le_x - re_x)
+                    if eye_dist > 1e-6:  # 小さすぎる距離は無視
+                        normalized_offset = nose_offset / eye_dist
+
+                        # 閾値に基づいて向きを判断 (値は調整可能)
+                        yaw_threshold = 0.15
+                        yaw = normalized_offset * 100  # ヨー角を計算
+                        # ヨー角に基づいて向きを判定
+                        if yaw < -15:
+                            yaw_direction = 'right'  # 修正後: 負のヨー角は右向きとする
+                        elif yaw > 15:
+                            yaw_direction = 'left'  # 修正後: 正のヨー角は左向きとする
+                        else:
+                            yaw_direction = 'front'
+                        # print(f"DEBUG: re={re_x:.2f}, le={le_x:.2f}, nt={nt_x:.2f}, center={(eye_center_x):.2f}, offset={normalized_offset:.2f}, dir={yaw_direction}")
+                except IndexError:
+                    # キーポイントが取得できない場合がある
+                    print("警告: 顔のキーポイントが取得できず、向きを推定できませんでした。")
+                    pass  # yaw_direction は 'front' のまま
+                except Exception as e:
+                    print(f"警告: 顔向き推定中にエラーが発生しました: {e}")
+                    pass  # yaw_direction は 'front' のまま
+
+                # 顔領域を拡張（10%拡張）
+                padding = int(0.1 * min(w, h))
+                exp_x = max(0, x - padding)
+                exp_y = max(0, y - padding)
+                exp_w = min(iw - exp_x, w + 2 * padding)
+                exp_h = min(ih - exp_y, h + 2 * padding)
+
+                detected_faces_info.append((exp_x, exp_y, exp_w, exp_h, yaw_direction))
+
+        return detected_faces_info
 
     def evaluate_face_sharpness(self, image, face):
         """

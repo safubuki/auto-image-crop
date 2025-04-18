@@ -20,7 +20,7 @@
 </div>
 
 <div align="center">
-  <img src="doc_images/crop_img2.jpg" alt="クロップ結果のサンプル" width="300"/><br>
+  <img src="doc_images/crop_img2.jpg" alt="クロップ結果のサンプル" width="350"/><br>
   <em>クロップ結果のサンプル２</em>
 </div>
 
@@ -158,7 +158,7 @@ total_score = (0.4 × size_score) + (0.4 × center_score) + (0.2 × sharpness_sc
 ### 視覚的フィードバック機能
 
 <div align="center">
-  <img src="doc_images/app_img.png" alt="視覚的フィードバック例" width="600"/><br>
+  <img src="doc_images/app_img.png" alt="視覚的フィードバック例" width="700"/><br>
   <em>視覚的フィードバック表示の例</em>
 </div>
 

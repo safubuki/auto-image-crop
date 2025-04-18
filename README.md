@@ -3,19 +3,19 @@
 画像から顔を検出し、顔の位置を中心として16:9やその他選択したアスペクト比に自動クロップするツールです。写真の構図法（三分割法またはファイグリッド）を活用して、人物の顔や目の位置を最適な構図に配置します。
 
 <div align="center">
-  <img src="doc_images/app_img.png" alt="アプリケーション画面" width="600"/><br>
+  <img src="doc_images/app_img.png" alt="アプリケーション画面" width="700"/><br>
   <em>アプリケーションの画面１</em>
 </div>
 
 <div align="center">
-  <img src="doc_images/app_img2.png" alt="アプリケーション画面" width="600"/><br>
+  <img src="doc_images/app_img2.png" alt="アプリケーション画面" width="700"/><br>
   <em>アプリケーションの画面２</em>
 </div>
 
 <br>
 
 <div align="center">
-  <img src="doc_images/crop_img.jpg" alt="クロップ結果のサンプル" width="600"/><br>
+  <img src="doc_images/crop_img.jpg" alt="クロップ結果のサンプル" width="700"/><br>
   <em>クロップ結果のサンプル１</em>
 </div>
 

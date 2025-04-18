@@ -99,9 +99,9 @@ class Visualizer:
             x, y, w, h = face
             face_key = (x, y, w, h)
 
-            # 顔の矩形を描画（最高スコアの顔は赤、それ以外は灰色）
+            # 顔の矩形を描画（最高スコアの顔は緑、それ以外は灰色）
             is_best_face = has_scores and face_key == best_face_key
-            color = (0, 0, 255) if is_best_face else (128, 128, 128)  # 赤または灰色
+            color = (0, 255, 0) if is_best_face else (128, 128, 128)  # 緑または灰色
             thickness = 2  # 全ての矩形を2pxに統一
 
             cv2.rectangle(display_image, (x, y), (x + w, y + h), color, thickness)
@@ -109,6 +109,7 @@ class Visualizer:
             # スコア情報が存在する場合、表示（「No.4 0.567」形式、白の太字に黒の背景）
             if has_scores and face_key in face_score_map:
                 score_info = face_score_map[face_key]
+                # スコア表示を有効にする
                 score_text = f"No.{i+1} {score_info['score']:.3f}"
 
                 # 文字の位置（矩形の右下内側に表示）
@@ -116,7 +117,7 @@ class Visualizer:
                 font = cv2.FONT_HERSHEY_SIMPLEX
 
                 # テキストのサイズと位置を計算
-                text_size, baseline = cv2.getTextSize(score_text, font, font_scale, 2)
+                text_size, _ = cv2.getTextSize(score_text, font, font_scale, 2)  # baselineを_に変更
                 text_pos = (x + w - text_size[0] - 5, y + h - 5)
 
                 # 黒い背景を描画

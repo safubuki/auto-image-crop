@@ -81,11 +81,11 @@ class FaceDetector:
                         # 閾値に基づいて向きを判断 (値は調整可能)
                         yaw_threshold = 0.15
                         yaw = normalized_offset * 100  # ヨー角を計算
-                        # ヨー角に基づいて向きを判定
-                        if yaw < -15:
-                            yaw_direction = 'right'  # 修正後: 負のヨー角は右向きとする
-                        elif yaw > 15:
-                            yaw_direction = 'left'  # 修正後: 正のヨー角は左向きとする
+                        # ヨー角に基づいて向きを判定 (修正)
+                        if yaw < -15:  # 負のヨー角は「左向き」
+                            yaw_direction = 'left'
+                        elif yaw > 15:  # 正のヨー角は「右向き」
+                            yaw_direction = 'right'
                         else:
                             yaw_direction = 'front'
                         # print(f"DEBUG: re={re_x:.2f}, le={le_x:.2f}, nt={nt_x:.2f}, center={(eye_center_x):.2f}, offset={normalized_offset:.2f}, dir={yaw_direction}")

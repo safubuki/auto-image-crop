@@ -64,7 +64,9 @@ class FaceCropApp(QMainWindow):
         self.current_index = 0
 
         # アスペクト比の状態
-        self.selected_aspect_ratio = "16:9"  # デフォルト
+        self.aspect_ratio_mode = "batch"  # 'batch' or 'individual'
+        self.selected_aspect_ratio = "16:9"  # 一括モード時の値
+        self.individual_aspect_ratios = []  # 個別モード時に画像ごとに保持するリスト
 
         self.init_ui()
 
@@ -96,21 +98,40 @@ class FaceCropApp(QMainWindow):
         image_layout.addWidget(self.original_image_label)
         image_layout.addWidget(self.cropped_image_label)
 
+        # --- アスペクト比モード選択 ---
+        settings_layout = QVBoxLayout()
+        mode_group = QGroupBox("アスペクト比モード")
+        mode_layout = QVBoxLayout()
+        self.mode_button_group = QButtonGroup(self)
+        self.batch_mode_radio = QRadioButton("一括")
+        self.batch_mode_radio.setChecked(True)
+        self.individual_mode_radio = QRadioButton("個別")
+        self.mode_button_group.addButton(self.batch_mode_radio)
+        self.mode_button_group.addButton(self.individual_mode_radio)
+        mode_layout.addWidget(self.batch_mode_radio)
+        mode_layout.addWidget(self.individual_mode_radio)
+        mode_group.setLayout(mode_layout)
+        self.mode_button_group.buttonClicked.connect(self.on_mode_changed)
+        settings_layout.addWidget(mode_group)
+
         # --- アスペクト比選択ラジオボタン ---
         aspect_ratio_group = QGroupBox("アスペクト比")
         aspect_ratio_layout = QHBoxLayout()
         self.aspect_ratio_button_group = QButtonGroup(self)
 
+        self.aspect_ratio_buttons = {}
         ratios = ["16:9", "9:16", "4:3", "3:4"]
         for ratio in ratios:
             radio_button = QRadioButton(ratio)
             self.aspect_ratio_button_group.addButton(radio_button)
             aspect_ratio_layout.addWidget(radio_button)
+            self.aspect_ratio_buttons[ratio] = radio_button
             if ratio == self.selected_aspect_ratio:
                 radio_button.setChecked(True)
 
         self.aspect_ratio_button_group.buttonClicked.connect(self.on_aspect_ratio_changed)
         aspect_ratio_group.setLayout(aspect_ratio_layout)
+        settings_layout.addWidget(aspect_ratio_group)
 
         # --- ボタンと情報ラベルのレイアウト ---
         # ナビゲーションボタンと情報ラベル用の中央レイアウト
@@ -146,44 +167,74 @@ class FaceCropApp(QMainWindow):
 
         # レイアウトをメインウィジェットに追加
         main_layout.addLayout(image_layout)  # 画像表示
-        main_layout.addWidget(aspect_ratio_group)  # アスペクト比選択
+        main_layout.addLayout(settings_layout)  # アスペクト比モードと選択
         main_layout.addLayout(button_layout)  # ボタンと情報ラベル
         main_layout.setSpacing(8)
 
         main_widget.setLayout(main_layout)
         self.setCentralWidget(main_widget)
 
-    def on_aspect_ratio_changed(self, button):
-        """アスペクト比ラジオボタンが変更されたときのハンドラ"""
-        self.selected_aspect_ratio = button.text()
-        print(f"アスペクト比が {self.selected_aspect_ratio} に変更されました")
-        # 画像が読み込まれていれば、現在の画像で再クロップして表示を更新
-        if self.original_images:
-            self.re_crop_current_image()
-
-    def re_crop_current_image(self):
-        """現在のインデックスの画像を現在のアスペクト比で再クロップして表示"""
-        if not self.original_images or self.current_index >= len(self.original_images):
+    def on_mode_changed(self, button):
+        new_mode = "batch" if button == self.batch_mode_radio else "individual"
+        if new_mode == self.aspect_ratio_mode:
             return
-
-        idx = self.current_index
-        img = self.original_images[idx]
-
-        # 現在選択されているアスペクト比で再クロップ
-        debug_result = self.image_processor.crop_image(img,
-                                                       self.selected_aspect_ratio,
-                                                       debug_mode=True)
-
-        if isinstance(debug_result, dict):
-            self.debug_images[idx] = debug_result
-            self.cropped_images[idx] = debug_result.get("cropped_clean", None)  # 保存用クリーン画像
+        self.aspect_ratio_mode = new_mode
+        if not self.original_images:
+            return
+        if new_mode == "individual":
+            # 一括->個別:全画像の個別設定を現在の一括値で初期化
+            self.individual_aspect_ratios = [self.selected_aspect_ratio] * len(self.original_images)
         else:
-            # エラーまたは顔検出失敗の場合
-            self.debug_images[idx] = None
-            self.cropped_images[idx] = None
-
-        # 表示を更新
+            # 個別->一括:個別設定をクリア
+            self.individual_aspect_ratios.clear()
+        self._update_all_crop_results()
         self.show_current_image()
+
+    def on_aspect_ratio_changed(self, button):
+        new_ratio = button.text()
+        if self.aspect_ratio_mode == "batch":
+            self.selected_aspect_ratio = new_ratio
+            if self.original_images:
+                self._update_all_crop_results()
+                self.show_current_image()
+        else:
+            idx = self.current_index
+            if 0 <= idx < len(self.individual_aspect_ratios):
+                self.individual_aspect_ratios[idx] = new_ratio
+                self._update_crop_results(idx)
+                self.show_current_image()
+            else:
+                self.selected_aspect_ratio = new_ratio
+
+    def _get_current_aspect_ratio(self, index=None):
+        if self.aspect_ratio_mode == "batch":
+            return self.selected_aspect_ratio
+        idx = self.current_index if index is None else index
+        if 0 <= idx < len(self.individual_aspect_ratios):
+            return self.individual_aspect_ratios[idx]
+        return self.selected_aspect_ratio
+
+    def _update_crop_results(self, index):
+        if not (0 <= index < len(self.original_images)):
+            return
+        img = self.original_images[index]
+        aspect = self._get_current_aspect_ratio(index)
+        result = self.image_processor.crop_image(img, aspect, debug_mode=True)
+        if isinstance(result, dict):
+            self.debug_images[index] = result
+            self.cropped_images[index] = result.get("cropped_clean")
+        else:
+            self.debug_images[index] = None
+            self.cropped_images[index] = None
+
+    def _update_all_crop_results(self):
+        self.debug_images = [None] * len(self.original_images)
+        self.cropped_images = [None] * len(self.original_images)
+        self.individual_aspect_ratios = ([self.selected_aspect_ratio] *
+                                         len(self.original_images) if self.aspect_ratio_mode
+                                         == "individual" else self.individual_aspect_ratios)
+        for i in range(len(self.original_images)):
+            self._update_crop_results(i)
 
     def batch_load_images(self):
         """
@@ -222,6 +273,7 @@ class FaceCropApp(QMainWindow):
                 QMessageBox.warning(self, "警告", "画像の読み込みに失敗しました")
                 return
             self.info_label.setText(f"{len(self.original_images)}枚の画像を読み込みました")
+            self._update_all_crop_results()
             self.show_current_image()
             self.update_navigation_buttons()
             self.batch_save_button.setEnabled(True)
@@ -269,6 +321,14 @@ class FaceCropApp(QMainWindow):
             self.cropped_image_label.setText("クロップ失敗")
             self.info_label.setText(f"{idx+1}/{len(self.original_images)} (クロップ失敗)")
 
+        # アスペクト比ボタン状態同期
+        current = self._get_current_aspect_ratio()
+        blocked = self.aspect_ratio_button_group.signalsBlocked()
+        self.aspect_ratio_button_group.blockSignals(True)
+        if current in self.aspect_ratio_buttons:
+            self.aspect_ratio_buttons[current].setChecked(True)
+        self.aspect_ratio_button_group.blockSignals(blocked)
+
     def display_cv_image(self, label, cv_image):
         """QLabelにOpenCV画像を表示するヘルパー関数"""
         if cv_image is None:
@@ -290,7 +350,6 @@ class FaceCropApp(QMainWindow):
             print(f"画像表示エラー: {e}")
             label.setText(f"表示エラー: {e}")
 
-    # ... show_next_image, show_prev_image, update_navigation_buttons は変更なし ...
     def show_next_image(self):
         """
         次の画像を表示
@@ -338,7 +397,7 @@ class FaceCropApp(QMainWindow):
             if img is not None:
                 # 元画像のパスからファイル名を取得
                 original_path = self.image_paths[i]
-                base_name, ext = os.path.splitext(os.path.basename(original_path))
+                base_name, _ = os.path.splitext(os.path.basename(original_path))
                 # 新しいファイル名を作成 (プレフィックス_元の名前_連番.jpg)
                 filename = f"{prefix}_{base_name}_{count}.jpg"  # 保存はJPG形式に統一
                 path = os.path.join(folder, filename)

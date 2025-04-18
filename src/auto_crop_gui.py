@@ -105,7 +105,10 @@ class FaceCropApp(QMainWindow):
         self.mode_button_group = QButtonGroup(self)
         self.batch_mode_radio = QRadioButton("一括")
         self.batch_mode_radio.setChecked(True)
+        # モード説明用のツールチップ
+        self.batch_mode_radio.setToolTip("一括モード: 全ての画像に同じアスペクト比を適用します。")
         self.individual_mode_radio = QRadioButton("個別")
+        self.individual_mode_radio.setToolTip("個別モード: 画像ごとにアスペクト比を設定できます。")
         self.mode_button_group.addButton(self.batch_mode_radio)
         self.mode_button_group.addButton(self.individual_mode_radio)
         mode_layout.addWidget(self.batch_mode_radio)
